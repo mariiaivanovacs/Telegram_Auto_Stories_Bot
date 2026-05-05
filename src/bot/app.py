@@ -92,6 +92,7 @@ def run_bot() -> None:
     app.add_handler(CallbackQueryHandler(pipeline.btn_run_now,       pattern="^run_now$"))
     app.add_handler(CallbackQueryHandler(pipeline.btn_run_step_3,    pattern="^run_step_3$"))
     app.add_handler(CallbackQueryHandler(pipeline.btn_run_step_4,    pattern="^run_step_4$"))
+    app.add_handler(CallbackQueryHandler(pipeline.btn_select_design, pattern=r"^select_design:\d+$"))
     # Large price change confirmations
     app.add_handler(CallbackQueryHandler(pipeline.btn_approve_price,  pattern=r"^(approve_price_\d+|approve_price:\d+)$"))
     app.add_handler(CallbackQueryHandler(pipeline.btn_preserve_price, pattern=r"^(preserve_price_\d+|old_price:\d+)$"))
@@ -109,12 +110,10 @@ def run_bot() -> None:
     app.add_handler(CallbackQueryHandler(images.btn_process_backgrounds,  pattern="^process_backgrounds$"))
 
     # Settings
-    app.add_handler(CallbackQueryHandler(settings_hdl.btn_manage_settings,  pattern="^manage_settings$"))
-    app.add_handler(CallbackQueryHandler(settings_hdl.btn_set_schedule_day, pattern="^set_schedule_day$"))
+    app.add_handler(CallbackQueryHandler(settings_hdl.btn_manage_settings,   pattern="^manage_settings$"))
     app.add_handler(CallbackQueryHandler(settings_hdl.btn_set_schedule_time, pattern="^set_schedule_time$"))
-    app.add_handler(CallbackQueryHandler(settings_hdl.btn_weekday_select,   pattern=r"^weekday:\w+$"))
-    app.add_handler(CallbackQueryHandler(settings_hdl.btn_set_max_posts,    pattern="^set_max_posts$"))
-    app.add_handler(CallbackQueryHandler(settings_hdl.btn_max_posts_select, pattern=r"^max_posts:\d+$"))
+    app.add_handler(CallbackQueryHandler(settings_hdl.btn_set_max_posts,     pattern="^set_max_posts$"))
+    app.add_handler(CallbackQueryHandler(settings_hdl.btn_max_posts_select,  pattern=r"^max_posts:\d+$"))
 
     # Channels
     app.add_handler(CallbackQueryHandler(channels.btn_manage_channels, pattern="^manage_channels$"))

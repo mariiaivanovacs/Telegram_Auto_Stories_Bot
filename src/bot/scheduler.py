@@ -20,11 +20,11 @@ try:
 except Exception:
     Application = None
 
-_JOB_ID = "weekly_run"
+_JOB_ID = "daily_run"
 
 
 async def _scheduled_run() -> None:
-    logger.info("Scheduled weekly run triggered")
+    logger.info("Scheduled daily run triggered")
     from src.main import run_pipeline
     from src.sender import send_to_admins
 
@@ -36,11 +36,10 @@ async def _scheduled_run() -> None:
 
 async def setup(application: Application, run_time: str, timezone: str) -> None:
     if AsyncIOScheduler is None:
-        logger.warning("APScheduler not installed — scheduled weekly runs disabled.")
+        logger.warning("APScheduler not installed — scheduled daily runs disabled.")
         return
 
     tz = pytz.timezone(timezone)
-    weekday = db.get_schedule_weekday(default="mon")
     time_str = db.get_schedule_time(default=run_time)
     hour, minute = map(int, time_str.split(":"))
 
@@ -48,18 +47,17 @@ async def setup(application: Application, run_time: str, timezone: str) -> None:
     scheduler.add_job(
         _scheduled_run,
         trigger="cron",
-        day_of_week=weekday,
         hour=hour,
         minute=minute,
         id=_JOB_ID,
     )
     scheduler.start()
     application.bot_data["scheduler"] = scheduler
-    logger.info("Scheduler: weekly run on %s at %s %s", weekday, time_str, timezone)
+    logger.info("Scheduler: daily run at %s %s", time_str, timezone)
 
 
-async def reschedule(application: Application, weekday: str, run_time: str, timezone: str) -> None:
-    """Update the weekly job with new day/time without restarting the scheduler."""
+async def reschedule(application: Application, run_time: str, timezone: str) -> None:
+    """Update the daily job with a new time without restarting the scheduler."""
     scheduler = application.bot_data.get("scheduler")
     if scheduler is None or not scheduler.running:
         await setup(application, run_time, timezone)
@@ -70,12 +68,11 @@ async def reschedule(application: Application, weekday: str, run_time: str, time
     scheduler.reschedule_job(
         _JOB_ID,
         trigger="cron",
-        day_of_week=weekday,
         hour=hour,
         minute=minute,
         timezone=tz,
     )
-    logger.info("Scheduler rescheduled: %s at %s %s", weekday, run_time, timezone)
+    logger.info("Scheduler rescheduled: daily at %s %s", run_time, timezone)
 
 
 async def teardown(application: Application) -> None:

@@ -157,7 +157,7 @@ def run_pipeline(progress_cb=None, wait_chat_id: int | None = None) -> None:
         _notify("🎨 Создаю сторис...")
         story_paths: list[str] = []
         try:
-            story_paths = generate_stories(price_results, settings.story)
+            story_paths = generate_stories(price_results, settings.story, design=db.get_story_design())
         except Exception as exc:
             logger.error("Story generation failed: %s", exc, exc_info=True)
             errors.append(f"Story generation failed: {exc}")

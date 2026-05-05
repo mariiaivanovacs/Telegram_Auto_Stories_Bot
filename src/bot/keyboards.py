@@ -28,8 +28,8 @@ def main_menu() -> InlineKeyboardMarkup:
 
 def debug_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Шаг 3: Сторис",      callback_data="run_step_3")],
-        [InlineKeyboardButton("Шаг 4: Тест шрифта", callback_data="run_step_4")],
+        # [InlineKeyboardButton("Шаг 3: Сторис",      callback_data="run_step_3")],
+        [InlineKeyboardButton("Настройка/Тест историй", callback_data="run_step_4")],
         [InlineKeyboardButton("⬅️ Назад",            callback_data="back_to_main")],
     ])
 
@@ -87,26 +87,23 @@ def report_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-_DAYS_RU = {
-    "mon": "Понедельник", "tue": "Вторник", "wed": "Среда",
-    "thu": "Четверг",     "fri": "Пятница", "sat": "Суббота", "sun": "Воскресенье",
-}
-_DAYS_SHORT = {
-    "mon": "Пн", "tue": "Вт", "wed": "Ср",
-    "thu": "Чт", "fri": "Пт", "sat": "Сб", "sun": "Вс",
-}
+
+def design_select_keyboard(design_num: int, current: int) -> InlineKeyboardMarkup:
+    marker = " ✅" if design_num == current else ""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            f"Выбрать дизайн {design_num}{marker}",
+            callback_data=f"select_design:{design_num}",
+        )
+    ]])
 
 
-def settings_keyboard(weekday: str, run_time: str, max_posts: int) -> InlineKeyboardMarkup:
-    day_label = _DAYS_SHORT.get(weekday, weekday)
+def settings_keyboard(run_time: str, max_posts: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(
-            f"📅 Расписание: {day_label} в {run_time}", callback_data="noop"
+            f"📅 Расписание: каждый день в {run_time}", callback_data="noop"
         )],
-        [
-            InlineKeyboardButton("Изменить день",   callback_data="set_schedule_day"),
-            InlineKeyboardButton("Изменить время",  callback_data="set_schedule_time"),
-        ],
+        [InlineKeyboardButton("Изменить время запуска", callback_data="set_schedule_time")],
         [InlineKeyboardButton(
             f"📨 Постов на канал: {max_posts}", callback_data="noop"
         )],
@@ -114,14 +111,6 @@ def settings_keyboard(weekday: str, run_time: str, max_posts: int) -> InlineKeyb
         [InlineKeyboardButton("⬅️ Назад",                callback_data="back_to_main")],
     ])
 
-
-def weekday_keyboard() -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(label, callback_data=f"weekday:{code}")]
-        for code, label in _DAYS_RU.items()
-    ]
-    rows.append([InlineKeyboardButton("⬅️ Назад", callback_data="manage_settings")])
-    return InlineKeyboardMarkup(rows)
 
 
 def max_posts_keyboard(current: int) -> InlineKeyboardMarkup:

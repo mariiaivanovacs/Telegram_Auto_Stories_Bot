@@ -253,8 +253,20 @@ async def btn_run_step_4(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> Non
     if lock.is_locked():
         await query.edit_message_text("⚠️ Запуск уже выполняется.")
         return
-    await query.edit_message_text("⏳ Шаг 4: рендер тестовых сторис...")
+    await query.edit_message_text("⏳ Рендер 3 вариантов дизайна...")
     await asyncio.to_thread(_run_step_4_sync, update.effective_chat.id)
+
+
+async def btn_select_design(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    design_num = int(query.data.split(":")[1])
+    db.set_story_design(design_num)
+    await query.edit_message_caption(
+        caption=f"✅ Дизайн {design_num} выбран — будет применён при следующем запуске пайплайна.",
+    )
 
 
 # ── Trigger logic ──────────────────────────────────────────────────────────────
@@ -370,16 +382,17 @@ def _run_step_3_sync(chat_id: int) -> None:
                     db.update_product_price(r["db_id"], r["calculated_price"])
 
             ready_paths = pick_for_render()
+            design = db.get_story_design()
             if ready_paths:
                 progress("🎨 Рендерю сторис из готовых фото...")
                 from src.story import generate_price_text_stories_from_ready
                 story_paths = generate_price_text_stories_from_ready(
-                    price_results, settings.story, ready_paths
+                    price_results, settings.story, ready_paths, design=design
                 )
             else:
                 progress("🎨 Готовых фото нет — рендерю из оригинальных фонов...")
                 from src.story import generate_price_text_stories
-                story_paths = generate_price_text_stories(price_results, settings.story)
+                story_paths = generate_price_text_stories(price_results, settings.story, design=design)
 
             sent = sum(1 for p in story_paths if send_photo_to_chat(chat_id, p))
             n_priced = sum(1 for r in price_results if not r["price_kept"])
@@ -400,7 +413,7 @@ def _run_step_3_sync(chat_id: int) -> None:
         lock.release()
 
 
-# ── Step 4: font / text preview ────────────────────────────────────────────────
+# ── Step 4: design preview ─────────────────────────────────────────────────────
 
 def _run_step_4_sync(chat_id: int) -> None:
     if not lock.acquire():
@@ -409,40 +422,60 @@ def _run_step_4_sync(chat_id: int) -> None:
 
     try:
         from src.ready_images import pick_for_render
+        from src.sender import send_photo_to_chat_with_markup
+        from src.story import generate_price_text_stories, generate_price_text_stories_from_ready
 
         settings = get_settings()
         db.init(settings)
         price_results = _price_results_from_db()
+        current_design = db.get_story_design()
 
         ready_paths = pick_for_render()
-        font_variants = _step_4_font_variants(settings.story)
+        bg = ready_paths[:1] if ready_paths else None
 
-        if ready_paths:
-            send_to_chat(chat_id, "🎨 Рендерю тестовые сторис из готовых фото...")
-            from src.story import generate_price_text_stories_from_ready
-            story_paths = generate_price_text_stories_from_ready(
-                price_results, settings.story, ready_paths,
-                output_dir="output/step_4_text_tests",
-                font_paths=font_variants,
-            )
-        else:
-            send_to_chat(chat_id, "🎨 Готовых фото нет — рендерю из оригинальных фонов...")
-            from src.story import generate_price_text_stories
-            story_paths = generate_price_text_stories(
-                price_results, settings.story,
-                output_dir="output/step_4_text_tests",
-                font_paths=font_variants,
-            )
+        send_to_chat(chat_id, "🎨 Рендерю 3 варианта дизайна...")
+        rendered: list[tuple[int, str]] = []
 
-        sent = sum(1 for p in story_paths if send_photo_to_chat(chat_id, p))
-        send_to_chat(
-            chat_id,
-            f"Шаг 4 завершён: {sent}/{len(story_paths)} тестовых сторис.\n"
-            "Вариант 1 — текущий шрифт, 2 — SF UI, 3 — Avenir.",
-        )
+        for design_num in (1, 2, 3):
+            try:
+                if bg:
+                    paths = generate_price_text_stories_from_ready(
+                        price_results, settings.story, bg,
+                        output_dir="output/step_4_designs",
+                        design=design_num,
+                        date_str=f"d{design_num}",
+                    )
+                else:
+                    paths = generate_price_text_stories(
+                        price_results, settings.story,
+                        output_dir="output/step_4_designs",
+                        design=design_num,
+                        date_str=f"d{design_num}",
+                    )
+                if paths:
+                    rendered.append((design_num, paths[0]))
+            except Exception as exc:
+                logger.error("Step 4 design %d render failed: %s", design_num, exc)
+                send_to_chat(chat_id, f"⚠️ Дизайн {design_num}: ошибка рендера — {exc}")
+
+        design_names = {
+            1: "Дизайн 1 — тёмный (белый текст, без фона у заголовка)",
+            2: "Дизайн 2 — светлый (белые карточки, чёрный текст)",
+            3: "Дизайн 3 — светлый, другой шрифт (Avenir / serif)",
+        }
+        for design_num, path in rendered:
+            markup = {
+                "inline_keyboard": [[{
+                    "text": f"Выбрать дизайн {design_num}" + (" ✅" if design_num == current_design else ""),
+                    "callback_data": f"select_design:{design_num}",
+                }]]
+            }
+            send_photo_to_chat_with_markup(chat_id, path, design_names[design_num], markup)
+
+        send_to_chat(chat_id, f"Текущий дизайн: {current_design}. Нажмите кнопку под нужным вариантом.")
     except Exception as exc:
         logger.error("Step 4 error: %s", exc, exc_info=True)
-        send_to_chat(chat_id, f"❌ Шаг 4: ошибка — {exc}")
+        send_to_chat(chat_id, f"❌ Настройка историй: ошибка — {exc}")
     finally:
         lock.release()
 
@@ -482,27 +515,6 @@ def _format_pending_change_prompt(change: dict) -> str:
         "Выберите действие, после ответа пайплайн продолжит сторис и отправку.",
     ])
 
-
-def _step_4_font_variants(story_cfg) -> list[str | None]:
-    return [
-        getattr(story_cfg, "font_path", None),
-        _first_existing([
-            "/Users/mariaivanova/Library/Fonts/SF-UI-DISPLAY-SEMIBOLD.TTF",
-            "/System/Library/Fonts/SFNS.ttf",
-        ]),
-        _first_existing([
-            "/System/Library/Fonts/Avenir Next.ttc",
-            "/System/Library/Fonts/Avenir.ttc",
-        ]),
-    ]
-
-
-def _first_existing(paths: list[str]) -> str | None:
-    from pathlib import Path
-    for p in paths:
-        if Path(p).exists():
-            return p
-    return None
 
 
 # ── Formatting helpers (also used in tests) ────────────────────────────────────

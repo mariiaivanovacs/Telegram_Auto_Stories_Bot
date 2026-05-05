@@ -1,11 +1,13 @@
 services:
   bot:
     build: .
+    container_name: auto_competition_bot
     restart: unless-stopped
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./output:/app/output
+      - ./ready_images:/app/ready_images
       - ./backgrounds:/app/backgrounds
     env_file:
       - .env

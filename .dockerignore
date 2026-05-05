@@ -1,0 +1,45 @@
+# Runtime data — mounted as volumes at runtime
+data/
+logs/
+output/
+ready_images/
+
+# Secrets
+.env
+
+# Telethon sessions
+*.session
+*.session-journal
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Dev / CI
+.pytest_cache/
+.mypy_cache/
+tests/
+
+# Docs & planning
+*.md
+phases.md
+phased_plan.md
+new_architecture.md
+correct_approach.md
+description.md
+instruction.md
+tz.md
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Git
+.git/

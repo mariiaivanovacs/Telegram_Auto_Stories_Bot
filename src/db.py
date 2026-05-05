@@ -384,6 +384,18 @@ def set_schedule_time(value: str) -> None:
     set_setting("schedule_time", value)
 
 
+def get_story_design(default: int = 1) -> int:
+    raw = get_setting("story_design", str(default))
+    try:
+        return max(1, min(3, int(raw or default)))
+    except ValueError:
+        return default
+
+
+def set_story_design(value: int) -> None:
+    set_setting("story_design", str(max(1, min(3, value))))
+
+
 # ── Runs ───────────────────────────────────────────────────────────────────────
 
 def create_run() -> int:
@@ -709,6 +721,32 @@ def get_product_by_id(product_id: int) -> dict | None:
             WHERE p.id = ?
         """, (product_id,)).fetchone()
         return dict(row) if row else None
+
+
+def get_price_history_30d() -> list[dict]:
+    """All price history entries from the last 30 days, newest first."""
+    with _conn() as conn:
+        rows = conn.execute("""
+            SELECT
+                r.started_at,
+                r.id          AS run_id,
+                p.display_name,
+                p.canonical_name,
+                p.category,
+                ph.competitor_price,
+                ph.source_channel,
+                ph.calculated_price,
+                ph.price_delta,
+                ph.is_large_change,
+                ph.price_kept
+            FROM price_history ph
+            JOIN products p ON p.id = ph.product_id
+            JOIN runs     r ON r.id = ph.run_id
+            WHERE r.started_at >= datetime('now', '-30 days')
+              AND r.status != 'running'
+            ORDER BY r.started_at DESC, p.category, p.display_name
+        """).fetchall()
+        return [dict(r) for r in rows]
 
 
 def get_competition_report_data(run_id: int) -> list[dict]:

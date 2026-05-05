@@ -59,17 +59,25 @@ async def btn_download_excel(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     try:
         from src.report import build_competition_report_excel
-        rows = db.get_competition_report_data(run["id"])
-        xlsx_bytes = build_competition_report_excel(run, rows)
+        rows    = db.get_competition_report_data(run["id"])
+        history = db.get_price_history_30d()
+        xlsx_bytes = build_competition_report_excel(run, rows, history=history)
 
         ts_file = run["started_at"][:10]
         filename = f"report_{ts_file}.xlsx"
+
+        history_runs = len({r["run_id"] for r in history}) if history else 0
+        caption = (
+            f"📊 Отчёт о конкурентах — {run['started_at'][:16].replace('T', ' ')}\n"
+            f"История: {history_runs} запуск(ов) за 30 дней · "
+            "3 листа: Сводка / Текущий запуск / История 30 дней"
+        )
 
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=io.BytesIO(xlsx_bytes),
             filename=filename,
-            caption=f"📊 Отчёт о конкурентах — {run['started_at'][:16].replace('T', ' ')}",
+            caption=caption,
         )
         await context.bot.send_message(
             chat_id=update.effective_chat.id,

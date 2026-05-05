@@ -45,6 +45,60 @@ _USERNAME_RE = re.compile(r'@\w[\w.]*')
 _PRICE_TEXT_RE = re.compile(r'(?:\d[\d\s]*|—)\s*рублей', re.IGNORECASE)
 _EMOJI_IMAGE_CACHE: dict[tuple[str, int], Image.Image | None] = {}
 
+# ── Story design presets ───────────────────────────────────────────────────────
+# Each dict supplies panel fill/outline, text colours, stroke, and spacing.
+# Design 1: dark minimalist (current). Design 2: light/white panels, black text.
+# Design 3: same as 2 with a different font (Avenir/serif).
+_DESIGNS: dict[int, dict] = {
+    1: {
+        "title_panel":    (0, 0, 0, 0),
+        "title_outline":  (0, 0, 0, 0),
+        "card_panel":     (0, 0, 0, 115),
+        "card_outline":   (255, 255, 255, 22),
+        "body_text_c":    (245, 245, 245, 255),
+        "header_text_c":  (200, 200, 200, 255),
+        "username_text_c":(100, 190, 255, 255),
+        "stroke_w":       3,
+        "stroke_c":       (0, 0, 0, 210),
+        "line_gap":       9,
+        "pad_y":          20,
+        "pad_y_title":    24,
+        "font_override":  None,
+    },
+    2: {
+        "title_panel":    (255, 255, 255, 200),
+        "title_outline":  (220, 220, 220, 70),
+        "card_panel":     (255, 255, 255, 210),
+        "card_outline":   (200, 200, 200, 60),
+        "body_text_c":    (20, 20, 20, 255),
+        "header_text_c":  (60, 60, 60, 255),
+        "username_text_c":(30, 100, 210, 255),
+        "stroke_w":       0,
+        "stroke_c":       (0, 0, 0, 0),
+        "line_gap":       13,
+        "pad_y":          12,
+        "pad_y_title":    14,
+        "font_override":  None,
+        "content_width":  True,   # panel hugs text width instead of spanning full row
+    },
+    3: {
+        "title_panel":    (255, 255, 255, 200),
+        "title_outline":  (220, 220, 220, 70),
+        "card_panel":     (255, 255, 255, 210),
+        "card_outline":   (200, 200, 200, 60),
+        "body_text_c":    (20, 20, 20, 255),
+        "header_text_c":  (60, 60, 60, 255),
+        "username_text_c":(30, 100, 210, 255),
+        "stroke_w":       0,
+        "stroke_c":       (0, 0, 0, 0),
+        "line_gap":       13,
+        "pad_y":          12,
+        "pad_y_title":    14,
+        "font_override":  "avenir_or_serif",
+        "content_width":  True,
+    },
+}
+
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
@@ -55,6 +109,7 @@ def generate_stories(
     backgrounds_dir: str = "ready_images",
     sample_text_path: str = "assets/sample_text.txt",
     date_str: str | None = None,
+    design: int = 1,
 ) -> list[str]:
     """Generate 3 story images with 4 text sections over ready background images."""
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -69,7 +124,7 @@ def generate_stories(
         out_path = Path(output_dir) / f"story_{i}_{date_str}.png"
         try:
             background = Image.open(bg_path).convert("RGBA")
-            text_layer = _render_story_text_layer(text, story_cfg)
+            text_layer = _render_story_text_layer(text, story_cfg, design=design)
             img = Image.alpha_composite(background, text_layer)
             img.convert("RGB").save(out_path, "PNG", optimize=True)
             paths.append(str(out_path))
@@ -124,6 +179,7 @@ def generate_price_text_stories_from_ready(
     sample_text_path: str = "assets/sample_text.txt",
     date_str: str | None = None,
     font_paths: list[str | None] | None = None,
+    design: int = 1,
 ) -> list[str]:
     """
     Like generate_price_text_stories but uses pre-processed images from ready_images/.
@@ -143,7 +199,7 @@ def generate_price_text_stories_from_ready(
         try:
             render_cfg = _story_cfg_with_font(story_cfg, _font_path_for_index(font_paths, i))
             background = Image.open(bg_path).convert("RGBA")
-            text_layer = _render_story_text_layer(text, render_cfg)
+            text_layer = _render_story_text_layer(text, render_cfg, design=design)
             img = Image.alpha_composite(background, text_layer)
             img.convert("RGB").save(out_path, "PNG", optimize=True)
             paths.append(str(out_path))
@@ -164,6 +220,7 @@ def generate_price_text_stories(
     sample_text_path: str = "assets/sample_text.txt",
     date_str: str | None = None,
     font_paths: list[str | None] | None = None,
+    design: int = 1,
 ) -> list[str]:
     """Generate 3 edited story images with the sample text and calculated prices."""
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -178,7 +235,7 @@ def generate_price_text_stories(
         out_path = Path(output_dir) / f"step_3_story_{i}_{date_str}.png"
         try:
             render_cfg = _story_cfg_with_font(story_cfg, _font_path_for_index(font_paths, i))
-            _render_price_text_story(bg_path, text, render_cfg, out_path)
+            _render_price_text_story(bg_path, text, render_cfg, out_path, design=design)
             paths.append(str(out_path))
             logger.info("Step 3 story %d saved: %s", i, out_path)
         except Exception as e:
@@ -242,9 +299,9 @@ def _render_photo_preview(bg_path: str, out_path: Path) -> None:
     img.save(out_path, "PNG", optimize=True)
 
 
-def _render_price_text_story(bg_path: str, text: str, cfg, out_path: Path) -> None:
+def _render_price_text_story(bg_path: str, text: str, cfg, out_path: Path, design: int = 1) -> None:
     background = _prepare_story_background(bg_path)
-    text_layer = _render_story_text_layer(text, cfg)
+    text_layer = _render_story_text_layer(text, cfg, design=design)
     img = Image.alpha_composite(background, text_layer)
     img.convert("RGB").save(out_path, "PNG", optimize=True)
 
@@ -260,7 +317,7 @@ def _prepare_story_background(bg_path: str) -> Image.Image:
     )
 
 
-def _render_story_text_layer(text: str, cfg) -> Image.Image:
+def _render_story_text_layer(text: str, cfg, design: int = 1) -> Image.Image:
     """
     Text/layout layer boundary.
 
@@ -270,7 +327,7 @@ def _render_story_text_layer(text: str, cfg) -> Image.Image:
     added; image preparation stays in Pillow either way.
     """
     layer = Image.new("RGBA", (STORY_W, STORY_H), (0, 0, 0, 0))
-    return _draw_sample_text_lines(layer, text, cfg)
+    return _draw_sample_text_lines(layer, text, cfg, design=design)
 
 
 def _enhance_photo(img: Image.Image) -> Image.Image:
@@ -362,35 +419,31 @@ def _draw_content(img: Image.Image, lines: list[dict], cfg) -> Image.Image:
     return img
 
 
-def _draw_sample_text_lines(img: Image.Image, text: str, cfg) -> Image.Image:
+def _draw_sample_text_lines(img: Image.Image, text: str, cfg, design: int = 1) -> Image.Image:
     draw = ImageDraw.Draw(img)
     sections = _build_story_sections(_sanitize_story_text(text))
+    design_spec = _DESIGNS.get(design, _DESIGNS[1])
+    base_font = getattr(cfg, "font_path", "")
+    font_path = _resolve_design_font(design_spec, base_font)
+
     rendered_sections = []
     max_total_h = STORY_H - 160
 
     for title_size in range(56, 33, -2):
-        section_title_font = _font(getattr(cfg, "font_path", ""), title_size, bold=True)
-        section_body_font = _font(getattr(cfg, "font_path", ""), max(30, title_size - 12), bold=True)
+        section_title_font = _font(font_path, title_size, bold=True)
+        section_body_font = _font(font_path, max(30, title_size - 12), bold=True)
         candidate = _prepare_render_sections(
-            sections,
-            draw,
-            section_title_font,
-            section_body_font,
-            getattr(cfg, "font_path", ""),
+            sections, draw, section_title_font, section_body_font, font_path, design_spec,
         )
         total_h = _sections_total_height(candidate)
         if total_h <= max_total_h:
             rendered_sections = candidate
             break
     if not rendered_sections:
-        section_title_font = _font(getattr(cfg, "font_path", ""), 32, bold=True)
-        section_body_font = _font(getattr(cfg, "font_path", ""), 26, bold=True)
+        section_title_font = _font(font_path, 32, bold=True)
+        section_body_font = _font(font_path, 26, bold=True)
         rendered_sections = _prepare_render_sections(
-            sections,
-            draw,
-            section_title_font,
-            section_body_font,
-            getattr(cfg, "font_path", ""),
+            sections, draw, section_title_font, section_body_font, font_path, design_spec,
         )
         total_h = _sections_total_height(rendered_sections)
 
@@ -471,19 +524,20 @@ def _prepare_render_sections(
     title_font,
     body_font,
     font_path: str = "",
+    design_spec: dict | None = None,
 ) -> list[dict]:
+    spec = design_spec or _DESIGNS[1]
     prepared: list[dict] = []
     for section in sections:
         is_title = section["kind"] == "title"
-        is_footer = section["kind"] == "footer"
         font = title_font if is_title else body_font
         regular_font = _font(_regular_font_path(font_path), _font_size(font), bold=False)
         header_font = _font(font_path, max(24, _font_size(body_font) - 7), bold=True)
         pad_x = 36 if is_title else 32
-        pad_y = 24 if is_title else 20
+        pad_y = spec["pad_y_title"] if is_title else spec["pad_y"]
         margin_x = 40
         max_w = STORY_W - 2 * margin_x - 2 * pad_x
-        line_gap = 12 if is_title else 9
+        line_gap = spec["line_gap"]
         wrapped_lines: list[str] = []
         if section.get("title"):
             wrapped_lines.extend(_wrap_sample_text(section["title"], draw, header_font, max_w))
@@ -499,6 +553,31 @@ def _prepare_render_sections(
             content_h += header_h if idx < title_count else line_h
         content_h += max(0, len(body_lines) - 1) * line_gap
         height = content_h + 2 * pad_y
+
+        # Panel width: full-row or content-aware (hug text) per design
+        full_panel_w = STORY_W - 2 * margin_x
+        if spec.get("content_width"):
+            line_widths = [
+                _text_width(draw, line, header_font if idx < title_count else font)
+                for idx, line in enumerate(body_lines)
+            ] if body_lines else [200]
+            max_text_w = max(line_widths) if line_widths else 200
+            panel_width = min(full_panel_w, max(300, max_text_w + 2 * pad_x + 16))
+        else:
+            panel_width = full_panel_w
+
+        # Design-specific panel + text styling embedded into each section dict
+        if is_title:
+            fill    = spec["title_panel"]
+            outline = spec["title_outline"]
+            stroke_w = spec["stroke_w"]
+            stroke_c = spec["stroke_c"]
+        else:
+            fill    = spec["card_panel"]
+            outline = spec["card_outline"]
+            stroke_w = 0
+            stroke_c = (0, 0, 0, 0)
+
         prepared.append({
             "kind": section["kind"],
             "font": font,
@@ -517,6 +596,15 @@ def _prepare_render_sections(
             "gap_after": 18 if is_title else 14,
             "align": "center" if is_title else "left",
             "min_width": 760 if is_title else (720 if section["kind"] in {"iphone", "devices"} else 620),
+            "panel_width": panel_width,
+            # design fields
+            "fill": fill,
+            "outline": outline,
+            "body_text_c":     spec["body_text_c"],
+            "header_text_c":   spec["header_text_c"],
+            "username_text_c": spec["username_text_c"],
+            "stroke_w": stroke_w,
+            "stroke_c": stroke_c,
         })
     return prepared
 
@@ -529,13 +617,15 @@ def _sections_total_height(sections: list[dict]) -> int:
 
 def _draw_story_section(img: Image.Image, y: int, section: dict) -> Image.Image:
     draw = ImageDraw.Draw(img)
-    x0 = section["margin_x"]
-    x1 = STORY_W - section["margin_x"]
+    panel_w = section.get("panel_width", STORY_W - 2 * section["margin_x"])
+    x0 = (STORY_W - panel_w) // 2
+    x1 = x0 + panel_w
     y1 = y + section["height"]
 
     layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
     layer_draw = ImageDraw.Draw(layer)
-    fill, outline = _section_palette(section["kind"])
+    fill   = section.get("fill",    _section_palette(section["kind"])[0])
+    outline = section.get("outline", _section_palette(section["kind"])[1])
     layer_draw.rounded_rectangle((x0, y, x1, y1), radius=section["radius"], fill=fill, outline=outline, width=2)
     img = Image.alpha_composite(img, layer)
 
@@ -566,6 +656,24 @@ def _style(ltype: str, ft, fb, fp, accent: str):
     if ltype == "price":
         return fp, _dark
     return fb, _mid  # footer
+
+
+def _resolve_design_font(spec: dict, base_font_path: str) -> str:
+    override = spec.get("font_override")
+    if not override:
+        return base_font_path
+    if override == "avenir_or_serif":
+        candidates = [
+            "/System/Library/Fonts/Avenir Next.ttc",
+            "/System/Library/Fonts/Avenir.ttc",
+            "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+        ]
+        for p in candidates:
+            if Path(p).exists():
+                return p
+    return base_font_path
 
 
 def _font(path: str, size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
@@ -666,15 +774,18 @@ def _draw_rich_line(
                 seg_w = emoji_img.width
         else:
             font = _segment_font(section, seg_type, is_section_title=is_section_title)
-            color = _segment_color(seg_type, section["kind"], is_section_title=is_section_title)
-            if section["kind"] == "title":
-                stroke_w, stroke_c = 3, (0, 0, 0, 210)
+            if seg_type == "username":
+                color = section.get("username_text_c") or _segment_color("username")
+            elif is_section_title:
+                color = section.get("header_text_c") or _segment_color("text", section["kind"], True)
             else:
-                stroke_w, stroke_c = 0, (0, 0, 0, 0)
+                color = section.get("body_text_c") or _segment_color("text", section["kind"])
+            stroke_w = section.get("stroke_w", 0)
+            stroke_c = section.get("stroke_c", (0, 0, 0, 0))
             draw.text((x, y), seg_text, font=font, fill=color, stroke_width=stroke_w, stroke_fill=stroke_c)
             seg_w = _text_width(draw, seg_text, font)
-        if seg_type == "username":
-            underline_runs.append((x, x + seg_w, y + section["line_height"] - 6))
+        # if seg_type == "username":
+        #     underline_runs.append((x, x + seg_w, y + section["line_height"] - 6))
         x += seg_w
     for ux0, ux1, uy in underline_runs:
         draw.line((ux0, uy, ux1, uy), fill=(49, 99, 255, 255), width=2)

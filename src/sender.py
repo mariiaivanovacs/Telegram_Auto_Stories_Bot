@@ -59,6 +59,24 @@ def send_photo_to_chat(chat_id: int, photo_path: str) -> bool:
     return _send_photo(settings.bot_token, chat_id, photo_path)
 
 
+def send_photo_to_chat_with_markup(chat_id: int, photo_path: str, caption: str, reply_markup: dict) -> bool:
+    """Send a photo with caption and inline keyboard to a specific chat."""
+    settings = get_settings()
+    try:
+        with open(photo_path, "rb") as f:
+            result = _api(
+                settings.bot_token, "sendPhoto",
+                data={"chat_id": chat_id, "caption": caption, "reply_markup": __import__("json").dumps(reply_markup)},
+                files={"photo": ("story.png", f, "image/png")},
+            )
+    except FileNotFoundError:
+        logger.error("Photo file not found: %s", photo_path)
+        return False
+    if not result.get("ok"):
+        logger.error("sendPhoto+markup %s to %s failed: %s", photo_path, chat_id, result.get("description"))
+    return bool(result.get("ok"))
+
+
 # ── Userbot story posting ──────────────────────────────────────────────────────
 
 async def _post_stories_userbot(story_paths: list[str]) -> bool:
