@@ -61,5 +61,5 @@ jobs:
             --set-secrets "TELEGRAM_ADMIN_ID=TELEGRAM_ADMIN_ID:latest" \
             --set-secrets "TELEGRAM_PHONE=TELEGRAM_PHONE:latest" \
             --set-secrets "ADMIN_PASSWORD=ADMIN_PASSWORD:latest" \
-            --add-volume "name=data-vol,type=cloud-storage,bucket=${{ env.GCS_DATA_BUCKET }}" \
-            --add-volume-mount "volume=data-vol,mount-path=/app/data"
+            --add-volume "name=gcs-vol,type=cloud-storage,bucket=${{ env.GCS_DATA_BUCKET }}" \
+            --add-volume-mount "volume=gcs-vol,mount-path=/app/gcs_data"
