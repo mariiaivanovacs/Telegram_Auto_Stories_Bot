@@ -17,5 +17,17 @@ fi
 # Initialise DB schema + seed products/channels from config.yaml (idempotent)
 python scripts/init_db.py
 
+# Cloud Run requires the container to serve HTTP on $PORT.
+# When running locally (docker compose), PORT is not set, so this block is skipped.
+if [ -n "$PORT" ]; then
+    python3 -c "
+import http.server, threading, os
+class _H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self): self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
+    def log_message(self, *a): pass
+http.server.HTTPServer(('', int(os.environ['PORT'])), _H).serve_forever()
+" &
+fi
+
 # Start admin bot (keeps container alive; daily scheduler runs inside it)
 exec python -m src.bot

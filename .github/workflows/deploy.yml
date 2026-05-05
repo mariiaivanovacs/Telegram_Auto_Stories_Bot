@@ -1,0 +1,63 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [master]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: europe-west1
+  SERVICE: price-monitor-bot
+  IMAGE: europe-west1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/price-monitor/bot
+  GCS_DATA_BUCKET: ${{ secrets.GCS_DATA_BUCKET }}
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build and push image
+        run: |
+          docker build -t ${{ env.IMAGE }}:${{ github.sha }} -t ${{ env.IMAGE }}:latest .
+          docker push ${{ env.IMAGE }}:${{ github.sha }}
+          docker push ${{ env.IMAGE }}:latest
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE }} \
+            --image ${{ env.IMAGE }}:${{ github.sha }} \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --min-instances 1 \
+            --max-instances 1 \
+            --memory 512Mi \
+            --cpu 1 \
+            --no-allow-unauthenticated \
+            --ingress internal \
+            --timeout 3600 \
+            --set-env-vars "TZ=Europe/Moscow" \
+            --set-secrets "TELEGRAM_API_ID=TELEGRAM_API_ID:latest" \
+            --set-secrets "TELEGRAM_API_HASH=TELEGRAM_API_HASH:latest" \
+            --set-secrets "TELEGRAM_BOT_TOKEN=TELEGRAM_BOT_TOKEN:latest" \
+            --set-secrets "TELEGRAM_ADMIN_ID=TELEGRAM_ADMIN_ID:latest" \
+            --set-secrets "TELEGRAM_PHONE=TELEGRAM_PHONE:latest" \
+            --set-secrets "ADMIN_PASSWORD=ADMIN_PASSWORD:latest" \
+            --add-volume "name=data-vol,type=cloud-storage,bucket=${{ env.GCS_DATA_BUCKET }}" \
+            --add-volume-mount "volume=data-vol,mount-path=/app/data"
