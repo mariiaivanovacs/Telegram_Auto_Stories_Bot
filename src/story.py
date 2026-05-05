@@ -1,9 +1,11 @@
 import logging
 import random
+import re
+import copy
 from datetime import datetime
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +13,37 @@ STORY_W = 1080
 STORY_H = 1920
 
 _BG_EXTS = {".jpg", ".jpeg", ".png"}
+_SAMPLE_TEXT_PRICE_KEYS = [
+    "iphone_pro_256",
+    "iphone_pro_512",
+    "iphone_pro_1tb",
+    "iphone_pro_max_256",
+    "iphone_pro_max_512",
+    "iphone_pro_max_1tb",
+    "iphone_air",
+    "macbook_neo",
+    "airpods_pro_3",
+    "whoop_50",
+    "ps5",
+    "apple_watch_s11",
+]
+_EMOJI_TEXT_REPLACEMENTS = {
+    "🔥": "🔥",
+    "📱": "📱",
+    "💻": "💻",
+    "🎧": "🎧",
+    "💪": "💪",
+    "🎮": "🎮",
+    "⌚": "⌚",
+    "⚡️": "⚡️",
+    "⚡": "⚡",
+    "🚚": "🚚",
+    "〽️": "〽️",
+    "〽": "〽",
+}
+_USERNAME_RE = re.compile(r'@\w[\w.]*')
+_PRICE_TEXT_RE = re.compile(r'(?:\d[\d\s]*|—)\s*рублей', re.IGNORECASE)
+_EMOJI_IMAGE_CACHE: dict[tuple[str, int], Image.Image | None] = {}
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -19,34 +52,26 @@ def generate_stories(
     price_results: list[dict],
     story_cfg,
     output_dir: str = "output/stories",
-    backgrounds_dir: str = "backgrounds",
+    backgrounds_dir: str = "ready_images",
+    sample_text_path: str = "assets/sample_text.txt",
     date_str: str | None = None,
 ) -> list[str]:
-    """
-    Generate 3 story images from background templates.
-
-    Args:
-        price_results:   output of pricing.calculate_prices() — needs category, display_name
-        story_cfg:       StorySettings dataclass from config
-        output_dir:      where to save PNGs
-        backgrounds_dir: folder containing background images
-        date_str:        YYYYMMDD string for filename (defaults to today)
-
-    Returns:
-        list of absolute paths to the 3 generated PNG files
-    """
+    """Generate 3 story images with 4 text sections over ready background images."""
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     if date_str is None:
         date_str = datetime.now().strftime("%Y%m%d")
 
     backgrounds = _pick_backgrounds(backgrounds_dir, story_cfg.background_selection)
-    lines = _build_lines(price_results)
+    text = _build_sample_story_text(price_results, sample_text_path)
 
     paths: list[str] = []
     for i, bg_path in enumerate(backgrounds, start=1):
         out_path = Path(output_dir) / f"story_{i}_{date_str}.png"
         try:
-            _render(bg_path, lines, story_cfg, out_path)
+            background = Image.open(bg_path).convert("RGBA")
+            text_layer = _render_story_text_layer(text, story_cfg)
+            img = Image.alpha_composite(background, text_layer)
+            img.convert("RGB").save(out_path, "PNG", optimize=True)
             paths.append(str(out_path))
             logger.info("Story %d saved: %s", i, out_path)
         except Exception as e:
@@ -55,6 +80,127 @@ def generate_stories(
     if not paths:
         raise RuntimeError("All 3 story renders failed — check logs")
     return paths
+
+
+def generate_photo_previews(
+    story_cfg,
+    output_dir: str = "output/photo_previews",
+    backgrounds_dir: str = "backgrounds",
+    date_str: str | None = None,
+) -> list[str]:
+    """
+    Generate 3 edited story-size background images without text.
+
+    The edit is intentionally restrained: crop for Telegram story format, add a
+    little color/contrast/detail, then darken slightly so future text can sit on
+    top without fighting the photo.
+    """
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    if date_str is None:
+        date_str = datetime.now().strftime("%Y%m%d")
+
+    backgrounds = _pick_backgrounds(backgrounds_dir, story_cfg.background_selection)
+
+    paths: list[str] = []
+    for i, bg_path in enumerate(backgrounds, start=1):
+        out_path = Path(output_dir) / f"photo_preview_{i}_{date_str}.png"
+        try:
+            _render_photo_preview(bg_path, out_path)
+            paths.append(str(out_path))
+            logger.info("Photo preview %d saved: %s", i, out_path)
+        except Exception as e:
+            logger.error("Photo preview %d failed: %s", i, e, exc_info=True)
+
+    if not paths:
+        raise RuntimeError("All 3 photo preview renders failed — check logs")
+    return paths
+
+
+def generate_price_text_stories_from_ready(
+    price_results: list[dict],
+    story_cfg,
+    ready_paths: list[str],
+    output_dir: str = "output/step_3_stories",
+    sample_text_path: str = "assets/sample_text.txt",
+    date_str: str | None = None,
+    font_paths: list[str | None] | None = None,
+) -> list[str]:
+    """
+    Like generate_price_text_stories but uses pre-processed images from ready_images/.
+
+    Args:
+        ready_paths: paths already cropped, enhanced, and darkened — background processing skipped
+    """
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    if date_str is None:
+        date_str = datetime.now().strftime("%Y%m%d")
+
+    text = _build_sample_story_text(price_results, sample_text_path)
+
+    paths: list[str] = []
+    for i, bg_path in enumerate(ready_paths, start=1):
+        out_path = Path(output_dir) / f"step_3_story_{i}_{date_str}.png"
+        try:
+            render_cfg = _story_cfg_with_font(story_cfg, _font_path_for_index(font_paths, i))
+            background = Image.open(bg_path).convert("RGBA")
+            text_layer = _render_story_text_layer(text, render_cfg)
+            img = Image.alpha_composite(background, text_layer)
+            img.convert("RGB").save(out_path, "PNG", optimize=True)
+            paths.append(str(out_path))
+            logger.info("Story from ready %d saved: %s", i, out_path)
+        except Exception as e:
+            logger.error("Story from ready %d failed: %s", i, e, exc_info=True)
+
+    if not paths:
+        raise RuntimeError("All renders from ready images failed — check logs")
+    return paths
+
+
+def generate_price_text_stories(
+    price_results: list[dict],
+    story_cfg,
+    output_dir: str = "output/step_3_stories",
+    backgrounds_dir: str = "backgrounds",
+    sample_text_path: str = "assets/sample_text.txt",
+    date_str: str | None = None,
+    font_paths: list[str | None] | None = None,
+) -> list[str]:
+    """Generate 3 edited story images with the sample text and calculated prices."""
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    if date_str is None:
+        date_str = datetime.now().strftime("%Y%m%d")
+
+    backgrounds = _pick_backgrounds(backgrounds_dir, story_cfg.background_selection)
+    text = _build_sample_story_text(price_results, sample_text_path)
+
+    paths: list[str] = []
+    for i, bg_path in enumerate(backgrounds, start=1):
+        out_path = Path(output_dir) / f"step_3_story_{i}_{date_str}.png"
+        try:
+            render_cfg = _story_cfg_with_font(story_cfg, _font_path_for_index(font_paths, i))
+            _render_price_text_story(bg_path, text, render_cfg, out_path)
+            paths.append(str(out_path))
+            logger.info("Step 3 story %d saved: %s", i, out_path)
+        except Exception as e:
+            logger.error("Step 3 story %d failed: %s", i, e, exc_info=True)
+
+    if not paths:
+        raise RuntimeError("All 3 step 3 story renders failed — check logs")
+    return paths
+
+
+def _font_path_for_index(font_paths: list[str | None] | None, index: int) -> str | None:
+    if not font_paths or index > len(font_paths):
+        return None
+    return font_paths[index - 1]
+
+
+def _story_cfg_with_font(story_cfg, font_path: str | None):
+    if not font_path:
+        return story_cfg
+    cfg = copy.copy(story_cfg)
+    cfg.font_path = font_path
+    return cfg
 
 
 # ── Background selection ───────────────────────────────────────────────────────
@@ -89,6 +235,52 @@ def _render(bg_path: str, lines: list[dict], cfg, out_path: Path) -> None:
     img.convert("RGB").save(out_path, "PNG", optimize=True)
 
 
+def _render_photo_preview(bg_path: str, out_path: Path) -> None:
+    img = Image.open(bg_path).convert("RGB")
+    img = _resize_crop(img, STORY_W, STORY_H)
+    img = _enhance_photo(img)
+    img.save(out_path, "PNG", optimize=True)
+
+
+def _render_price_text_story(bg_path: str, text: str, cfg, out_path: Path) -> None:
+    background = _prepare_story_background(bg_path)
+    text_layer = _render_story_text_layer(text, cfg)
+    img = Image.alpha_composite(background, text_layer)
+    img.convert("RGB").save(out_path, "PNG", optimize=True)
+
+
+def _prepare_story_background(bg_path: str) -> Image.Image:
+    """Image-prep layer: crop, enhance, darken, and return an RGBA canvas."""
+    img = Image.open(bg_path).convert("RGB")
+    img = _resize_crop(img, STORY_W, STORY_H)
+    img = _enhance_photo(img).convert("RGBA")
+    return Image.alpha_composite(
+        img,
+        Image.new("RGBA", (STORY_W, STORY_H), (0, 0, 0, 42)),
+    )
+
+
+def _render_story_text_layer(text: str, cfg) -> Image.Image:
+    """
+    Text/layout layer boundary.
+
+    The current renderer is a Pillow implementation so the bot keeps working
+    with the existing dependency set. This function is the planned swap point for
+    an HTML/CSS browser renderer or Pango/Cairo renderer when those runtimes are
+    added; image preparation stays in Pillow either way.
+    """
+    layer = Image.new("RGBA", (STORY_W, STORY_H), (0, 0, 0, 0))
+    return _draw_sample_text_lines(layer, text, cfg)
+
+
+def _enhance_photo(img: Image.Image) -> Image.Image:
+    img = ImageEnhance.Color(img).enhance(1.06)
+    img = ImageEnhance.Contrast(img).enhance(1.08)
+    img = ImageEnhance.Sharpness(img).enhance(1.12)
+    img = ImageEnhance.Brightness(img).enhance(0.92)
+    return img
+
+
 def _resize_crop(img: Image.Image, w: int, h: int) -> Image.Image:
     ow, oh = img.size
     scale = max(w / ow, h / oh)
@@ -108,7 +300,9 @@ def _draw_content(img: Image.Image, lines: list[dict], cfg) -> Image.Image:
 
     font_title = _font(cfg.font_path, fs_title)
     font_body = _font(cfg.font_path, fs_body)
-    font_price = _font(cfg.font_path, fs_price)
+    # Prices use regular weight when available; falls back to bold
+    _reg_path = _regular_font_path(cfg.font_path) or cfg.font_path
+    font_price = _font(_reg_path, fs_price)
 
     line_heights = {
         "header":   int(fs_title * lh),
@@ -158,10 +352,9 @@ def _draw_content(img: Image.Image, lines: list[dict], cfg) -> Image.Image:
         if actual_w > max_w and actual_w > 0:
             ratio = max_w / actual_w
             shrunk_size = max(14, int(_font_size(font) * ratio))
-            font = _font(cfg.font_path, shrunk_size)
+            font_path = _reg_path if ltype == "price" else cfg.font_path
+            font = _font(font_path, shrunk_size)
 
-        # 1-px drop shadow
-        draw.text((text_x + 1, y + 1), text, font=font, fill=(0, 0, 0, 150))
         draw.text((text_x, y), text, font=font, fill=color)
 
         y += line_heights.get(ltype, int(fs_body * lh))
@@ -169,23 +362,255 @@ def _draw_content(img: Image.Image, lines: list[dict], cfg) -> Image.Image:
     return img
 
 
+def _draw_sample_text_lines(img: Image.Image, text: str, cfg) -> Image.Image:
+    draw = ImageDraw.Draw(img)
+    sections = _build_story_sections(_sanitize_story_text(text))
+    rendered_sections = []
+    max_total_h = STORY_H - 160
+
+    for title_size in range(56, 33, -2):
+        section_title_font = _font(getattr(cfg, "font_path", ""), title_size, bold=True)
+        section_body_font = _font(getattr(cfg, "font_path", ""), max(30, title_size - 12), bold=True)
+        candidate = _prepare_render_sections(
+            sections,
+            draw,
+            section_title_font,
+            section_body_font,
+            getattr(cfg, "font_path", ""),
+        )
+        total_h = _sections_total_height(candidate)
+        if total_h <= max_total_h:
+            rendered_sections = candidate
+            break
+    if not rendered_sections:
+        section_title_font = _font(getattr(cfg, "font_path", ""), 32, bold=True)
+        section_body_font = _font(getattr(cfg, "font_path", ""), 26, bold=True)
+        rendered_sections = _prepare_render_sections(
+            sections,
+            draw,
+            section_title_font,
+            section_body_font,
+            getattr(cfg, "font_path", ""),
+        )
+        total_h = _sections_total_height(rendered_sections)
+
+    y = max(60, (STORY_H - total_h) // 2)
+    for section in rendered_sections:
+        img = _draw_story_section(img, y, section)
+        y += section["height"] + section["gap_after"]
+    return img
+
+
+def _wrap_sample_text(text: str, draw: ImageDraw.ImageDraw, font, max_w: int) -> list[str]:
+    wrapped: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            wrapped.append("")
+            continue
+        if _text_width(draw, line, font) <= max_w:
+            wrapped.append(line)
+            continue
+
+        current = ""
+        for word in line.split():
+            candidate = word if not current else f"{current} {word}"
+            if _text_width(draw, candidate, font) <= max_w:
+                current = candidate
+            else:
+                if current:
+                    wrapped.append(current)
+                current = word
+        if current:
+            wrapped.append(current)
+    return wrapped
+
+
+def _build_story_sections(text: str) -> list[dict]:
+    lines = [line.strip() for line in text.splitlines()]
+    non_empty = [line for line in lines if line]
+    if not non_empty:
+        return []
+
+    # Section 1: Title (first line)
+    title = non_empty[0]
+    
+    # Sections 2-4: Split by section headers (iPhone, Девайсы/Devices, Контакты/Contact)
+    section_headers = {"iphone", "девайсы", "devices", "контакты", "contact", "order"}
+    current_section = None
+    sections_dict: dict[str, list[str]] = {"title": [title]}
+    
+    for line in non_empty[1:]:
+        low = line.lower()
+        if low in section_headers:
+            current_section = low if low in {"девайсы", "контакты"} else "iphone" if "iphone" in low else "devices" if "devices" in low else "contact"
+            if current_section not in sections_dict:
+                sections_dict[current_section] = []
+        elif current_section and line:
+            sections_dict[current_section].append(line)
+    
+    # Build sections list with 4 distinct panels
+    sections = [{"title": None, "lines": sections_dict["title"], "kind": "title"}]
+    if "iphone" in sections_dict and sections_dict["iphone"]:
+        sections.append({"title": "iPhone", "lines": sections_dict["iphone"], "kind": "iphone"})
+    if "девайсы" in sections_dict and sections_dict["девайсы"]:
+        sections.append({"title": "Девайсы", "lines": sections_dict["девайсы"], "kind": "devices"})
+    elif "devices" in sections_dict and sections_dict["devices"]:
+        sections.append({"title": "Devices", "lines": sections_dict["devices"], "kind": "devices"})
+    if "контакты" in sections_dict and sections_dict["контакты"]:
+        sections.append({"title": "Контакты", "lines": sections_dict["контакты"], "kind": "contacts"})
+    elif "contact" in sections_dict and sections_dict["contact"]:
+        sections.append({"title": "Contact", "lines": sections_dict["contact"], "kind": "contacts"})
+    
+    return sections
+
+
+def _prepare_render_sections(
+    sections: list[dict],
+    draw: ImageDraw.ImageDraw,
+    title_font,
+    body_font,
+    font_path: str = "",
+) -> list[dict]:
+    prepared: list[dict] = []
+    for section in sections:
+        is_title = section["kind"] == "title"
+        is_footer = section["kind"] == "footer"
+        font = title_font if is_title else body_font
+        regular_font = _font(_regular_font_path(font_path), _font_size(font), bold=False)
+        header_font = _font(font_path, max(24, _font_size(body_font) - 7), bold=True)
+        pad_x = 36 if is_title else 32
+        pad_y = 24 if is_title else 20
+        margin_x = 40
+        max_w = STORY_W - 2 * margin_x - 2 * pad_x
+        line_gap = 12 if is_title else 9
+        wrapped_lines: list[str] = []
+        if section.get("title"):
+            wrapped_lines.extend(_wrap_sample_text(section["title"], draw, header_font, max_w))
+        for line in section["lines"]:
+            wrapped = _wrap_sample_text(line, draw, font, max_w)
+            wrapped_lines.extend(wrapped or [""])
+        body_lines = [line for line in wrapped_lines if line]
+        title_count = 1 if section.get("title") and body_lines else 0
+        line_h = int(_font_size(font) * (1.12 if is_title else 1.08))
+        header_h = int(_font_size(header_font) * 1.05)
+        content_h = 0
+        for idx, line in enumerate(body_lines):
+            content_h += header_h if idx < title_count else line_h
+        content_h += max(0, len(body_lines) - 1) * line_gap
+        height = content_h + 2 * pad_y
+        prepared.append({
+            "kind": section["kind"],
+            "font": font,
+            "regular_font": regular_font,
+            "header_font": header_font,
+            "title_count": title_count,
+            "lines": body_lines,
+            "line_height": line_h,
+            "header_height": header_h,
+            "line_gap": line_gap,
+            "pad_x": pad_x,
+            "pad_y": pad_y,
+            "margin_x": margin_x,
+            "height": height,
+            "radius": 34 if is_title else 30,
+            "gap_after": 18 if is_title else 14,
+            "align": "center" if is_title else "left",
+            "min_width": 760 if is_title else (720 if section["kind"] in {"iphone", "devices"} else 620),
+        })
+    return prepared
+
+
+def _sections_total_height(sections: list[dict]) -> int:
+    if not sections:
+        return 0
+    return sum(section["height"] + section["gap_after"] for section in sections) - sections[-1]["gap_after"]
+
+
+def _draw_story_section(img: Image.Image, y: int, section: dict) -> Image.Image:
+    draw = ImageDraw.Draw(img)
+    x0 = section["margin_x"]
+    x1 = STORY_W - section["margin_x"]
+    y1 = y + section["height"]
+
+    layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    layer_draw = ImageDraw.Draw(layer)
+    fill, outline = _section_palette(section["kind"])
+    layer_draw.rounded_rectangle((x0, y, x1, y1), radius=section["radius"], fill=fill, outline=outline, width=2)
+    img = Image.alpha_composite(img, layer)
+
+    draw = ImageDraw.Draw(img)
+    text_y = y + section["pad_y"] - 2
+    for idx, line in enumerate(section["lines"]):
+        is_section_title = idx < section.get("title_count", 0)
+        _draw_rich_line(img, x0, x1, text_y, line, section, is_section_title=is_section_title)
+        text_y += section["header_height"] if is_section_title else section["line_height"]
+        if idx < len(section["lines"]) - 1:
+            text_y += section["line_gap"]
+    return img
+
+
+def _section_palette(kind: str) -> tuple[tuple[int, int, int, int], tuple[int, int, int, int]]:
+    if kind == "title":
+        return (0, 0, 0, 0), (0, 0, 0, 0)  # no panel — white text on raw background
+    return (0, 0, 0, 115), (255, 255, 255, 22)  # dark frosted glass
+
+
 def _style(ltype: str, ft, fb, fp, accent: str):
+    _dark = (20, 20, 20, 255)
+    _mid = (60, 60, 60, 255)
     if ltype == "header":
-        return ft, "#FFFFFF"
+        return ft, _dark
     if ltype == "category":
-        return fb, accent
+        return fb, _mid
     if ltype == "price":
-        return fp, "#FFFFFF"
-    return fb, "#CCCCCC"  # footer
+        return fp, _dark
+    return fb, _mid  # footer
 
 
-def _font(path: str, size: int) -> ImageFont.FreeTypeFont:
-    if path:
+def _font(path: str, size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+    candidates = [
+        path,
+        "/System/Library/Fonts/SFNS.ttf",
+        "/System/Library/Fonts/SFNSRounded.ttf",
+        "/System/Library/Fonts/SFCompact.ttf",
+        "/System/Library/Fonts/SFPro.ttf",
+        "/System/Library/Fonts/SF.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold else "",
+        "/System/Library/Fonts/Supplemental/Helvetica Bold.ttf" if bold else "",
+        "/System/Library/Fonts/Supplemental/Arial Unicode Bold.ttf" if bold else "",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/System/Library/Fonts/Supplemental/Helvetica.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
         try:
-            return ImageFont.truetype(path, size)
+            return ImageFont.truetype(candidate, size)
         except (IOError, OSError):
             pass
     return ImageFont.load_default(size=size)
+
+
+def _regular_font_path(path: str) -> str:
+    if not path:
+        return ""
+    candidates = [
+        path.replace("SemiBold", "Regular"),
+        path.replace("Semibold", "Regular"),
+        path.replace("SEMIBOLD", "REGULAR"),
+        path.replace("Bold", "Regular"),
+        path.replace("BOLD", "REGULAR"),
+        path.replace("Medium", "Regular"),
+        path.replace("MEDIUM", "REGULAR"),
+    ]
+    for candidate in candidates:
+        if candidate != path and Path(candidate).exists():
+            return candidate
+    return ""
 
 
 def _font_size(font) -> int:
@@ -202,6 +627,194 @@ def _text_width(draw: ImageDraw.ImageDraw, text: str, font) -> int:
         return 0
 
 
+def _rich_text_width(draw: ImageDraw.ImageDraw, line: str, section: dict, is_section_title: bool = False) -> int:
+    segments = _split_line_segments(line)
+    total = 0
+    for seg_type, seg_text in segments:
+        if seg_type == "emoji":
+            total += _emoji_width(seg_text, section, is_section_title=is_section_title)
+        else:
+            font = _segment_font(section, seg_type, is_section_title=is_section_title)
+            total += _text_width(draw, seg_text, font)
+    return total
+
+
+def _draw_rich_line(
+    img: Image.Image,
+    x0: int,
+    x1: int,
+    y: int,
+    line: str,
+    section: dict,
+    is_section_title: bool = False,
+) -> None:
+    draw = ImageDraw.Draw(img)
+    segments = _split_line_segments(line)
+    total_w = _rich_text_width(draw, line, section, is_section_title=is_section_title)
+    if section["align"] == "left":
+        x = x0 + section["pad_x"]
+    else:
+        x = x0 + ((x1 - x0) - total_w) // 2
+    underline_runs: list[tuple[int, int, int]] = []
+    for seg_type, seg_text in segments:
+        if seg_type == "emoji":
+            emoji_img = _emoji_image(seg_text, _segment_size(section, is_section_title=is_section_title))
+            if emoji_img is None:
+                seg_w = 0
+            else:
+                img.alpha_composite(emoji_img, (int(x), int(y)))
+                seg_w = emoji_img.width
+        else:
+            font = _segment_font(section, seg_type, is_section_title=is_section_title)
+            color = _segment_color(seg_type, section["kind"], is_section_title=is_section_title)
+            if section["kind"] == "title":
+                stroke_w, stroke_c = 3, (0, 0, 0, 210)
+            else:
+                stroke_w, stroke_c = 0, (0, 0, 0, 0)
+            draw.text((x, y), seg_text, font=font, fill=color, stroke_width=stroke_w, stroke_fill=stroke_c)
+            seg_w = _text_width(draw, seg_text, font)
+        if seg_type == "username":
+            underline_runs.append((x, x + seg_w, y + section["line_height"] - 6))
+        x += seg_w
+    for ux0, ux1, uy in underline_runs:
+        draw.line((ux0, uy, ux1, uy), fill=(49, 99, 255, 255), width=2)
+
+
+def _split_line_segments(line: str) -> list[tuple[str, str]]:
+    segments: list[tuple[str, str]] = []
+    i = 0
+    text_buf: list[str] = []
+
+    def flush_text() -> None:
+        if text_buf:
+            segments.extend(_split_price_segments("".join(text_buf)))
+            text_buf.clear()
+
+    while i < len(line):
+        username_match = _USERNAME_RE.match(line, i)
+        if username_match:
+            flush_text()
+            segments.append(("username", username_match.group(0)))
+            i = username_match.end()
+            continue
+
+        emoji_cluster = _take_emoji_cluster(line, i)
+        if emoji_cluster:
+            flush_text()
+            segments.append(("emoji", emoji_cluster))
+            i += len(emoji_cluster)
+            continue
+
+        text_buf.append(line[i])
+        i += 1
+
+    flush_text()
+    return segments or [("text", line)]
+
+
+def _split_price_segments(text: str) -> list[tuple[str, str]]:
+    segments: list[tuple[str, str]] = []
+    pos = 0
+    for match in _PRICE_TEXT_RE.finditer(text):
+        if match.start() > pos:
+            segments.append(("text", text[pos:match.start()]))
+        segments.append(("price", match.group(0)))
+        pos = match.end()
+    if pos < len(text):
+        segments.append(("text", text[pos:]))
+    return segments
+
+
+def _take_emoji_cluster(text: str, start: int) -> str:
+    if start >= len(text) or not _is_emoji_char(text[start]):
+        return ""
+    i = start + 1
+    while i < len(text):
+        ch = text[i]
+        if ord(ch) in {0xFE0E, 0xFE0F}:
+            i += 1
+            continue
+        if ord(ch) == 0x200D and i + 1 < len(text) and _is_emoji_char(text[i + 1]):
+            i += 2
+            continue
+        break
+    return text[start:i]
+
+
+def _is_emoji_char(ch: str) -> bool:
+    cp = ord(ch)
+    return (
+        0x1F000 <= cp <= 0x1FAFF
+        or 0x2600 <= cp <= 0x27BF
+        or 0x2300 <= cp <= 0x23FF
+        or cp == 0x303D
+    )
+
+
+def _segment_size(section: dict, is_section_title: bool = False) -> int:
+    base = section["header_font"] if is_section_title else section["font"]
+    return _font_size(base)
+
+
+def _emoji_width(text: str, section: dict, is_section_title: bool = False) -> int:
+    img = _emoji_image(text, _segment_size(section, is_section_title=is_section_title))
+    return img.width if img is not None else 0
+
+
+def _emoji_image(text: str, size: int) -> Image.Image | None:
+    key = (text, size)
+    if key not in _EMOJI_IMAGE_CACHE:
+        _EMOJI_IMAGE_CACHE[key] = _render_emoji_with_font(text, size)
+    cached = _EMOJI_IMAGE_CACHE[key]
+    return cached.copy() if cached is not None else None
+
+
+def _emoji_font(size: int) -> ImageFont.FreeTypeFont | None:
+    candidates = [
+        "/System/Library/Fonts/Apple Color Emoji.ttc",
+        "/Library/Fonts/Apple Color Emoji.ttc",
+        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+        "/usr/share/fonts/noto/NotoColorEmoji.ttf",
+        "/usr/share/fonts/truetype/noto-emoji/NotoColorEmoji.ttf",
+    ]
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size)
+        except (IOError, OSError):
+            pass
+    return None
+
+
+def _render_emoji_with_font(text: str, size: int) -> Image.Image | None:
+    font = _emoji_font(size)
+    if font is None:
+        return None
+    canvas = size * 3
+    tmp = Image.new("RGBA", (canvas, canvas), (0, 0, 0, 0))
+    d = ImageDraw.Draw(tmp)
+    d.text((0, 0), text, font=font, fill=(255, 255, 255, 255), embedded_color=True)
+    bbox = tmp.getbbox()
+    if not bbox:
+        return None
+    return tmp.crop(bbox)
+
+
+def _segment_font(section: dict, seg_type: str, is_section_title: bool = False):
+    if is_section_title:
+        return section["header_font"]
+    if seg_type == "price":
+        return section.get("regular_font") or section["font"]
+    return section["font"]
+
+
+def _segment_color(seg_type: str, kind: str = "", is_section_title: bool = False):
+    if seg_type == "username":
+        return (100, 190, 255, 255)
+    if is_section_title:
+        return (200, 200, 200, 255)  # slightly subdued for section headers inside cards
+    return (245, 245, 245, 255)  # white for all body text
+
+
 def _rounded_rect(draw: ImageDraw.ImageDraw, xy, r: int, fill) -> None:
     x0, y0, x1, y1 = xy
     draw.rectangle([x0 + r, y0, x1 - r, y1], fill=fill)
@@ -216,15 +829,14 @@ def _rounded_rect(draw: ImageDraw.ImageDraw, xy, r: int, fill) -> None:
 
 def _build_lines(price_results: list[dict]) -> list[dict]:
     lines: list[dict] = [
-        {"type": "header", "text": "Any tech in stock at a great price"},
+        {"type": "header", "text": "Любая техника по выгодной цене"},
         {"type": "spacer", "text": ""},
     ]
 
-    # Group by category, preserving original order
     seen_cats: list[str] = []
     by_cat: dict[str, list[dict]] = {}
     for r in price_results:
-        cat = r.get("category", "Other")
+        cat = r.get("category", "Другое")
         if cat not in by_cat:
             seen_cats.append(cat)
             by_cat[cat] = []
@@ -235,13 +847,58 @@ def _build_lines(price_results: list[dict]) -> list[dict]:
         for r in by_cat[cat]:
             name = r.get("display_name") or r.get("canonical_name", "")
             price = r.get("calculated_price")
-            price_str = f"{price:,}".replace(",", " ") + " RUB" if price is not None else "—"
+            price_str = f"{price:,}".replace(",", " ") + " рублей" if price is not None else "—"
             lines.append({"type": "price", "text": f"• {name} — {price_str}"})
         lines.append({"type": "spacer", "text": ""})
 
     lines += [
-        {"type": "footer", "text": "Original items, limited stock"},
-        {"type": "footer", "text": "Moscow delivery in 2 hours"},
-        {"type": "footer", "text": "Order: @svyat_001"},
+        {"type": "footer", "text": "Весь товар оригинал, количество ограничено"},
+        {"type": "footer", "text": "Доставка по Москве за 2 часа"},
+        {"type": "footer", "text": "Заказать: @svyat_001"},
     ]
     return lines
+
+
+def _build_sample_story_text(price_results: list[dict], sample_text_path: str) -> str:
+    template = _resolve_sample_text_path(sample_text_path).read_text(encoding="utf-8")
+    values: dict[str, str] = {
+        r["template_key"]: _story_price(r.get("calculated_price"))
+        for r in price_results
+        if r.get("template_key")
+    }
+    return re.sub(r"\{(\w+)\}", lambda m: values.get(m.group(1), "— рублей"), template)
+
+
+def _story_price(value: int | None) -> str:
+    if value is None:
+        return "— рублей"
+    return f"{value:,}".replace(",", " ") + " рублей"
+
+
+def _resolve_sample_text_path(sample_text_path: str) -> Path:
+    path = Path(sample_text_path)
+    if path.exists():
+        return path
+    if path.name == "sample.txt":
+        fallback = path.with_name("sample_text.txt")
+        if fallback.exists():
+            return fallback
+    if path.name == "sample_text.txt":
+        fallback = path.with_name("sample.txt")
+        if fallback.exists():
+            return fallback
+    raise FileNotFoundError(f"Sample text file not found: {sample_text_path}")
+
+
+def _sanitize_story_text(text: str) -> str:
+    # Remove emoji entries from the dictionary mappings
+    for src in _EMOJI_TEXT_REPLACEMENTS.keys():
+        text = text.replace(src, "")
+    # Remove asterisks used for bullet points
+    text = text.replace("*", "")
+    # Remove other common emoji variations and variation selectors
+    text = text.replace("\uFE0F", "")  # Variation Selector-16
+    text = text.replace("\uFE0E", "")  # Variation Selector-15
+    text = text.replace("\u200D", "")  # Zero-width joiner
+    cleaned_lines = [" ".join(line.split()) for line in text.splitlines()]
+    return "\n".join(cleaned_lines)

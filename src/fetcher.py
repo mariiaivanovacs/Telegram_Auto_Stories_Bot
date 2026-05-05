@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -31,9 +32,10 @@ except Exception:  # noqa: BLE001
 logger = logging.getLogger(__name__)
 
 SESSION_PATH = "data/userbot.session"
-MAX_MESSAGES_PER_CHANNEL = 10
 MAX_MESSAGE_AGE_DAYS = 30
 ITERATION_LIMIT_PER_CHANNEL = 100
+_IPHONE_RELEVANT_RE = r"\b(?:17|seventeen)\b"
+_NON_IPHONE_TARGET_TERMS = ("macbook", "airpods", "whoop", "ps5", "playstation", "watch")
 
 
 class NotAuthenticatedError(RuntimeError):
@@ -77,10 +79,13 @@ async def _fetch_channel(
         logger.warning("Channel %s missing from DB, skipping", username)
         return 0
 
+    max_posts = db.get_max_posts()
     count = 0
     try:
         async for msg in client.iter_messages(username, limit=ITERATION_LIMIT_PER_CHANNEL):
             if not msg.text or msg.date is None:
+                continue
+            if not _is_relevant_message(msg.text):
                 continue
             msg_date = msg.date.astimezone(timezone.utc)
             if msg_date < cutoff:
@@ -93,7 +98,7 @@ async def _fetch_channel(
                 run_id=run_id,
             )
             count += 1
-            if count >= MAX_MESSAGES_PER_CHANNEL:
+            if count >= max_posts:
                 break
 
     except FloodWaitError as e:
@@ -102,15 +107,33 @@ async def _fetch_channel(
         async for msg in client.iter_messages(username, limit=ITERATION_LIMIT_PER_CHANNEL):
             if not msg.text or msg.date is None:
                 continue
+            if not _is_relevant_message(msg.text):
+                continue
             if msg.date.astimezone(timezone.utc) < cutoff:
                 break
             db.upsert_message(channel_id, msg.id, msg.text, msg.date.isoformat(), run_id)
             count += 1
-            if count >= MAX_MESSAGES_PER_CHANNEL:
+            if count >= max_posts:
                 break
 
     logger.info("Channel %s: %d messages stored", username, count)
     return count
+
+
+def _is_relevant_message(text: str) -> bool:
+    """
+    Keep competitor messages that can matter to the configured pipeline.
+
+    iPhone lines are intentionally strict: iPhone 13/14/15/16 posts are noise for
+    this bot and should not be stored, shown in fetch output, or inspected during
+    matching. Mixed messages that include another tracked device are kept.
+    """
+    norm_text, _segments = normalize(text)
+    if "iphone" not in norm_text:
+        return True
+    if any(term in norm_text for term in _NON_IPHONE_TARGET_TERMS):
+        return True
+    return bool(re.search(_IPHONE_RELEVANT_RE, norm_text))
 
 
 async def _fetch_all(
@@ -126,6 +149,7 @@ async def _fetch_all(
         )
 
     settings = get_settings()
+    channels = db.get_active_channels()
     cutoff = datetime.now(timezone.utc) - timedelta(days=MAX_MESSAGE_AGE_DAYS)
     unavailable: list[str] = []
 
@@ -146,21 +170,21 @@ async def _fetch_all(
                 "with a real Telegram user phone number, not the BotFather bot token."
             )
 
-        for ch in settings.channels:
-            label = ch.display_name or ch.username
+        for ch in channels:
+            label = ch["display_name"] or ch["username"]
             try:
-                count = await _fetch_channel(client, ch.username, run_id, cutoff)
+                count = await _fetch_channel(client, ch["username"], run_id, cutoff)
                 msg = (
-                    f"  ✅ {label}: {count} recent post{'s' if count != 1 else ''}"
+                    f"  ✅ {label}: {count} последние посты"
                     if count > 0
-                    else f"  ⚠️ {label}: no text posts in the last {MAX_MESSAGE_AGE_DAYS} days"
+                    else f"  ⚠️ {label}: не было постов за последние {MAX_MESSAGE_AGE_DAYS} дней"
                 )
                 if progress_cb:
                     progress_cb(msg)
             except Exception as exc:
                 hint = _error_hint(exc)
-                logger.error("Cannot fetch %s: %s", ch.username, exc)
-                unavailable.append(ch.username)
+                logger.error("Cannot fetch %s: %s", ch["username"], exc)
+                unavailable.append(ch["username"])
                 if progress_cb:
                     progress_cb(f"  ❌ {label}: {hint}")
     finally:
@@ -170,14 +194,17 @@ async def _fetch_all(
     processed: list[dict] = []
     for row in raw:
         norm_text, segments = normalize(row["message_text"] or "")
+        raw_segments = [s.strip() for s in (row["message_text"] or "").splitlines() if s.strip()]
         processed.append({
             "channel_username": row["channel_username"],
             "normalized_text": norm_text,
             "segments": segments,
+            "raw_segments": raw_segments,
+            "raw_text": row["message_text"] or "",
             "message_date": row["message_date"],
         })
 
-    logger.info("Fetched %d messages across %d channels", len(processed), len(settings.channels))
+    logger.info("Fetched %d messages across %d channels", len(processed), len(channels))
     return processed, unavailable
 
 

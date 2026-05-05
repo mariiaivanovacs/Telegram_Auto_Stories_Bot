@@ -109,7 +109,7 @@ def match_products(
 
     Args:
         messages: list of dicts with keys:
-                  channel_username, normalized_text, segments
+                  channel_username, normalized_text, segments, raw_segments, raw_text
         products: list of ProductConfig from config
 
     Returns:
@@ -129,16 +129,19 @@ def match_products(
     for msg in messages:
         channel = msg["channel_username"]
         segments: list[str] = msg["segments"]
+        raw_segments: list[str] = msg.get("raw_segments") or segments
         full_text: str = msg["normalized_text"]
+        raw_text: str = msg.get("raw_text") or full_text
 
         for product in products:
             # Pass 1 — per-line match (handles "Product — price" per line)
             matched_in_pass1 = False
-            for seg in segments:
+            for idx, seg in enumerate(segments):
+                raw_seg = raw_segments[idx] if idx < len(raw_segments) else seg
                 if _matches(seg, product):
                     price = _extract_price(seg)
                     if price is not None:
-                        _record(results, product.id, price, channel, seg)
+                        _record(results, product.id, price, channel, seg, raw_seg)
                         matched_in_pass1 = True
 
             # Pass 2 — full-text context window (handles dense single-blob price lists)
@@ -162,7 +165,7 @@ def match_products(
                     if not excluded:
                         price = _extract_price(context)
                         if price is not None:
-                            _record(results, product.id, price, channel, context)
+                            _record(results, product.id, price, channel, context, raw_text)
 
     for entry in results.values():
         if entry["all_prices"]:
@@ -173,12 +176,20 @@ def match_products(
     return results
 
 
-def _record(results: dict, product_id: str, price: int, channel: str, text: str) -> None:
+def _record(
+    results: dict,
+    product_id: str,
+    price: int,
+    channel: str,
+    text: str,
+    original_text: str,
+) -> None:
     entry = results[product_id]
     entry["all_prices"].append(price)
     entry["matched_lines"].append({
         "channel": channel,
         "text": text,
+        "original_text": original_text,
         "price": price,
     })
     if entry["min_price"] is None or price < entry["min_price"]:

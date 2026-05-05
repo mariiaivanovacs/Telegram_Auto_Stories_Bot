@@ -2,13 +2,14 @@ import pytest
 from src.pricing import calculate_prices
 
 
-def product(template_key, canonical, current_price=None, db_id=1, category="iPhone", display_name=None):
+def product(template_key, canonical, current_price=None, db_id=1, category="iPhone", display_name=None, default_price=None):
     return {
         "id": db_id,
         "template_key": template_key,
         "canonical_name": canonical,
         "display_name": display_name or canonical,
         "category": category,
+        "default_price": default_price,
         "current_price": current_price,
         "previous_price": None,
     }
@@ -83,7 +84,10 @@ def test_delta_positive_when_price_rises():
 def test_delta_negative_when_price_falls():
     products = [product("p1", "A", current_price=90000)]
     results = calculate_prices({"p1": match(82000)}, products)
-    assert results[0]["price_delta"] == -8500  # 81500 - 90000
+    assert results[0]["price_delta"] == -3000
+    assert results[0]["calculated_price"] == 87000
+    assert results[0]["raw_calculated_price"] == 81500
+    assert results[0]["price_drop_capped"] is True
 
 
 def test_delta_zero_first_run():
@@ -103,7 +107,9 @@ def test_delta_zero_no_change():
 def test_large_change_flagged():
     products = [product("p1", "A", current_price=90000)]
     results = calculate_prices({"p1": match(82000)}, products, large_change_threshold=3000)
-    assert results[0]["is_large_change"] is True  # |−8500| > 3000
+    assert results[0]["calculated_price"] == 87000
+    assert results[0]["is_large_change"] is True
+    assert results[0]["price_drop_capped"] is True
 
 
 def test_small_change_not_flagged():
@@ -128,6 +134,29 @@ def test_large_change_up_also_flagged():
     products = [product("p1", "A", current_price=80000)]
     results = calculate_prices({"p1": match(90000)}, products, large_change_threshold=3000)
     assert results[0]["is_large_change"] is True  # |+9000| > 3000
+
+
+def test_default_price_drop_over_threshold_is_flagged():
+    products = [product("p1", "A", current_price=90000, default_price=99490)]
+    results = calculate_prices({"p1": match(95000)}, products, large_change_threshold=3000)
+    assert results[0]["calculated_price"] == 94500
+    assert results[0]["default_delta"] == -4990
+    assert results[0]["is_large_change"] is True
+
+
+def test_drop_cap_uses_threshold_after_admin_discount():
+    products = [product("p1", "A", current_price=100000)]
+    results = calculate_prices({"p1": match(95000)}, products, discount=500, large_change_threshold=3000)
+    assert results[0]["raw_calculated_price"] == 94500
+    assert results[0]["calculated_price"] == 97000
+    assert results[0]["price_delta"] == -3000
+    assert results[0]["price_drop_capped"] is True
+
+
+def test_default_price_increase_is_not_large_drop():
+    products = [product("p1", "A", current_price=90000, default_price=84000)]
+    results = calculate_prices({"p1": match(90000)}, products, large_change_threshold=3000)
+    assert results[0]["is_large_change"] is False
 
 
 # ── Output fields ──────────────────────────────────────────────────────────────

@@ -61,8 +61,10 @@ def test_report_build_price_list_callable():
 
 
 def test_story_generate_stories_callable():
-    from src.story import generate_stories
+    from src.story import generate_photo_previews, generate_price_text_stories, generate_stories
     assert callable(generate_stories)
+    assert callable(generate_photo_previews)
+    assert callable(generate_price_text_stories)
 
 
 def test_lock_api():
@@ -80,14 +82,25 @@ def test_db_api():
     assert callable(db.get_last_run)
     assert callable(db.get_all_products)
     assert callable(db.update_product_price)
+    assert callable(db.get_product_by_identifier)
+    assert callable(db.reset_product_price)
+    assert callable(db.mark_pending_price_change_for_manual)
+    assert callable(db.get_pending_manual_price_change_for_admin)
     assert callable(db.write_price_history)
     assert callable(db.is_admin)
     assert callable(db.add_admin)
+    assert callable(db.get_active_channels)
+    assert callable(db.get_all_channels)
+    assert callable(db.has_active_channels)
+    assert callable(db.upsert_channel)
+    assert callable(db.update_channel)
+    assert callable(db.deactivate_channel)
 
 
 def test_sender_api():
-    from src.sender import send_all, notify_admin
+    from src.sender import notify_admin, send_all, send_photo_to_chat
     assert callable(send_all)
+    assert callable(send_photo_to_chat)
     assert callable(notify_admin)
 
 
@@ -97,7 +110,7 @@ def test_fetcher_api():
 
 
 def test_bot_run_bot_callable():
-    from src.bot import run_bot
+    from src.bot.app import run_bot
     assert callable(run_bot)
 
 

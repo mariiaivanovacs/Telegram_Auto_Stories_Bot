@@ -72,6 +72,7 @@ class Settings:
     bot_token: str
     admin_id: int
     phone: str
+    admin_password: str
     channels: list
     products: list
     admins: list
@@ -138,6 +139,7 @@ def _load() -> Settings:
         bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
         admin_id=admin_id_env,
         phone=os.environ.get("TELEGRAM_PHONE", ""),
+        admin_password=os.environ.get("ADMIN_PASSWORD", ""),
         channels=channels,
         products=products,
         admins=admins,

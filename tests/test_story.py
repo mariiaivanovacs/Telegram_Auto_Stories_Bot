@@ -3,7 +3,19 @@ from pathlib import Path
 from PIL import Image
 
 from src.config import StorySettings
-from src.story import generate_stories, _resize_crop, _build_lines, _pick_backgrounds
+from src.story import (
+    generate_price_text_stories,
+    generate_photo_previews,
+    generate_stories,
+    _build_lines,
+    _build_sample_story_text,
+    _build_story_sections,
+    _enhance_photo,
+    _pick_backgrounds,
+    _resize_crop,
+    _sanitize_story_text,
+    _split_line_segments,
+)
 
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
@@ -193,6 +205,131 @@ def test_empty_price_results_still_renders(bg_dir, out_dir, cfg):
         date_str="20260504",
     )
     assert len(paths) == 3
+    for p in paths:
+        img = Image.open(p)
+        assert img.size == (1080, 1920)
+
+
+# ── generate_photo_previews ───────────────────────────────────────────────────
+
+def test_photo_previews_generate_3_files(bg_dir, out_dir, cfg):
+    paths = generate_photo_previews(
+        cfg,
+        output_dir=str(out_dir),
+        backgrounds_dir=str(bg_dir),
+        date_str="20260504",
+    )
+    assert len(paths) == 3
+
+
+def test_photo_previews_output_dimensions(bg_dir, out_dir, cfg):
+    paths = generate_photo_previews(
+        cfg,
+        output_dir=str(out_dir),
+        backgrounds_dir=str(bg_dir),
+        date_str="20260504",
+    )
+    for p in paths:
+        img = Image.open(p)
+        assert img.size == (1080, 1920)
+
+
+def test_photo_previews_filenames(bg_dir, out_dir, cfg):
+    paths = generate_photo_previews(
+        cfg,
+        output_dir=str(out_dir),
+        backgrounds_dir=str(bg_dir),
+        date_str="20260504",
+    )
+    names = [Path(p).name for p in paths]
+    assert "photo_preview_1_20260504.png" in names
+    assert "photo_preview_2_20260504.png" in names
+    assert "photo_preview_3_20260504.png" in names
+
+
+def test_enhance_photo_changes_pixels():
+    img = Image.new("RGB", (20, 20), color=(120, 80, 40))
+    enhanced = _enhance_photo(img)
+    assert enhanced.getpixel((0, 0)) != img.getpixel((0, 0))
+
+
+# ── generate_price_text_stories ───────────────────────────────────────────────
+
+def test_sample_story_text_replaces_prices(tmp_path, price_results):
+    template = tmp_path / "sample_text.txt"
+    template.write_text("Pro — ХХХ ₽\nMax — ХХХ ₽", encoding="utf-8")
+    text = _build_sample_story_text(price_results, str(template))
+    assert "ХХХ рублей" in text
+    assert "рублей" in text
+
+
+def test_sample_story_text_accepts_sample_txt_fallback(tmp_path, price_results):
+    template = tmp_path / "sample_text.txt"
+    template.write_text("Pro — ХХХ ₽", encoding="utf-8")
+    text = _build_sample_story_text(price_results, str(tmp_path / "sample.txt"))
+    assert "ХХХ рублей" in text
+
+
+def test_sanitize_story_text_removes_unrenderable_markers():
+    text = _sanitize_story_text("📱 iPhone\n* Pro 256 ГБ — 84 500 ₽\n⚡️ В наличии")
+    assert "📱" not in text
+    assert "*" not in text
+    assert "84 500 ₽" in text
+    assert "iPhone" in text
+    assert "В наличии" in text
+
+
+def test_split_line_segments_keeps_emoji_clusters_and_username():
+    segments = _split_line_segments("⚡️ В наличии у @svyat_001")
+    assert ("emoji", "⚡️") in segments
+    assert ("username", "@svyat_001") in segments
+
+
+def test_split_line_segments_marks_prices_for_regular_weight():
+    segments = _split_line_segments("Pro 256 ГБ — 84 500 рублей")
+    assert ("price", "84 500 рублей") in segments
+
+
+def test_build_story_sections_groups_content():
+    text = (
+        "Любая техника в наличии по выгодной цене\n"
+        "iPhone\n"
+        "Pro 256 ГБ — 84 500 ₽\n"
+        "Pro 512 ГБ — 120 000 ₽"
+    )
+    sections = _build_story_sections(text)
+    assert sections[0]["kind"] == "title"
+    assert len(sections) >= 2
+    assert sections[1]["title"] == "iPhone"
+    assert sections[1]["kind"] == "section"
+    assert any("Pro 256" in line for line in sections[1]["lines"])
+
+
+def test_price_text_stories_generate_3_files(bg_dir, out_dir, cfg, price_results, tmp_path):
+    template = tmp_path / "sample_text.txt"
+    template.write_text("Любая техника\nPro — ХХХ ₽", encoding="utf-8")
+    paths = generate_price_text_stories(
+        price_results,
+        cfg,
+        output_dir=str(out_dir),
+        backgrounds_dir=str(bg_dir),
+        sample_text_path=str(template),
+        date_str="20260504",
+    )
+    assert len(paths) == 3
+
+
+def test_price_text_stories_output_dimensions(bg_dir, out_dir, cfg, price_results, tmp_path):
+    template = tmp_path / "sample_text.txt"
+    template.write_text("Любая техника\nPro — ХХХ ₽", encoding="utf-8")
+    paths = generate_price_text_stories(
+        price_results,
+        cfg,
+        output_dir=str(out_dir),
+        backgrounds_dir=str(bg_dir),
+        sample_text_path=str(template),
+        date_str="20260504",
+    )
     for p in paths:
         img = Image.open(p)
         assert img.size == (1080, 1920)

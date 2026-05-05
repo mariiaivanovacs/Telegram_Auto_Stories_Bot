@@ -30,11 +30,22 @@ def calculate_prices(
         competitor_price = match.get("min_price")
         source_channel = match.get("source_channel")
         old_price = p["current_price"]  # None on first ever run
+        default_price = p.get("default_price")
 
         if competitor_price is not None:
-            calculated = competitor_price - discount
+            raw_calculated = competitor_price - discount
+            calculated = raw_calculated
+            was_drop_capped = False
+            if (
+                old_price is not None
+                and large_change_threshold > 0
+                and raw_calculated < old_price - large_change_threshold
+            ):
+                calculated = old_price - large_change_threshold
+                was_drop_capped = True
             delta = (calculated - old_price) if old_price is not None else 0
-            is_large = abs(delta) > large_change_threshold
+            default_delta = (calculated - default_price) if default_price is not None else None
+            is_large = was_drop_capped or abs(delta) > large_change_threshold
 
             results.append({
                 "db_id": p["id"],
@@ -43,16 +54,20 @@ def calculate_prices(
                 "display_name": p.get("display_name", p["canonical_name"]),
                 "category": p.get("category", "Other"),
                 "old_price": old_price,
+                "default_price": default_price,
                 "competitor_price": competitor_price,
                 "source_channel": source_channel,
+                "raw_calculated_price": raw_calculated,
                 "calculated_price": calculated,
                 "price_delta": delta,
+                "default_delta": default_delta,
                 "is_large_change": is_large,
+                "price_drop_capped": was_drop_capped,
                 "price_kept": False,
             })
             logger.debug(
                 "%s: competitor=%s → %s (delta=%+d%s)",
-                pid, competitor_price, calculated, delta, " LARGE" if is_large else "",
+                pid, competitor_price, calculated, delta, " CAPPED" if was_drop_capped else "",
             )
         else:
             results.append({
@@ -62,11 +77,15 @@ def calculate_prices(
                 "display_name": p.get("display_name", p["canonical_name"]),
                 "category": p.get("category", "Other"),
                 "old_price": old_price,
+                "default_price": default_price,
                 "competitor_price": None,
                 "source_channel": None,
+                "raw_calculated_price": old_price,
                 "calculated_price": old_price,
                 "price_delta": 0,
+                "default_delta": 0,
                 "is_large_change": False,
+                "price_drop_capped": False,
                 "price_kept": True,
             })
             logger.debug("%s: no price found — keeping %s", pid, old_price)

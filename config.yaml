@@ -16,9 +16,9 @@ schedule:
   timezone: "Europe/Moscow"
 
 story:
-  blur_radius: 8
-  darken_alpha: 120
-  panel_color: [0, 0, 0, 160]
+  blur_radius: 2
+  darken_alpha: 45
+  panel_color: [255, 255, 255, 190]
   panel_corner_radius: 24
   padding_x: 60
   padding_y: 48
@@ -27,32 +27,32 @@ story:
   font_size_body: 34
   font_size_price: 38
   line_height: 1.5
-  accent_color: "#F5A623"
+  accent_color: "#3C3C3C"
   background_selection: "random"
 
 price_list_template: |
-  Any tech in stock at a great price 🔥
+  Любая техника в наличии по выгодной цене 🔥
 
   iPhone 17
-  • 17 Pro 256 GB — {iphone_pro_256} RUB
-  • 17 Pro 512 GB — {iphone_pro_512} RUB
-  • 17 Pro 1 TB — {iphone_pro_1tb} RUB
-  • 17 Pro Max 256 GB — {iphone_pro_max_256} RUB
-  • 17 Pro Max 512 GB — {iphone_pro_max_512} RUB
-  • 17 Pro Max 1 TB — {iphone_pro_max_1tb} RUB
-  • 17 Air — {iphone_air} RUB
-  • eSIM price ↑ +500 RUB
+  • 17 Pro 256 ГБ — {iphone_pro_256} руб.
+  • 17 Pro 512 ГБ — {iphone_pro_512} руб.
+  • 17 Pro 1 ТБ — {iphone_pro_1tb} руб.
+  • 17 Pro Max 256 ГБ — {iphone_pro_max_256} руб.
+  • 17 Pro Max 512 ГБ — {iphone_pro_max_512} руб.
+  • 17 Pro Max 1 ТБ — {iphone_pro_max_1tb} руб.
+  • 17 Air — {iphone_air} руб.
+  • eSIM доплата +500 руб.
 
-  Other
-  • MacBook Neo — {macbook_neo} RUB
-  • AirPods Pro 3 — {airpods_pro_3} RUB
-  • Whoop 5.0 Peak — {whoop_50} RUB
-  • PS5 — {ps5} RUB
-  • Apple Watch S11 — {apple_watch_s11} RUB
+  Девайсы
+  • MacBook Neo — {macbook_neo} руб.
+  • AirPods Pro 3 — {airpods_pro_3} руб.
+  • Whoop 5.0 Peak — {whoop_50} руб.
+  • PS5 — {ps5} руб.
+  • Apple Watch S11 — {apple_watch_s11} руб.
 
-  All items are original, but stock is limited!
-  Delivery in Moscow within 2 hours
-  To order, message me: @svyat_001
+  Весь товар оригинал, количество ограничено!
+  Доставка по Москве за 2 часа
+  Заказать: @svyat_001
 
 # Seed admin — replaced with real telegram_id before deployment
 admins:

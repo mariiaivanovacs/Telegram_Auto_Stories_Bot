@@ -16,13 +16,15 @@ from src.fetcher import fetch_messages, NotAuthenticatedError
 from src.matcher import match_products
 from src.pricing import calculate_prices
 from src.report import build_price_list, build_report
-from src.sender import send_all, send_to_chat_markup
+from src.sender import send_all
 from src.story import generate_stories
 
 logger = logging.getLogger(__name__)
 
 _LOG_DIR = Path("logs")
 _LOG_FILE = _LOG_DIR / "app.log"
+_APPROVAL_POLL_SECONDS = 2
+_APPROVAL_TIMEOUT_SECONDS = 60 * 60 * 4
 
 
 def setup_logging() -> None:
@@ -46,7 +48,7 @@ def setup_logging() -> None:
     root.addHandler(console)
 
 
-def run_pipeline(progress_cb=None) -> None:
+def run_pipeline(progress_cb=None, wait_chat_id: int | None = None) -> None:
     """
     Execute the full daily pipeline:
       fetch → match → price → report → stories → deliver → persist
@@ -60,6 +62,7 @@ def run_pipeline(progress_cb=None) -> None:
     started_at = datetime.now(timezone.utc).isoformat()
     errors: list[str] = []
     unavailable: list[str] = []
+    run_id: int | None = None
 
     def _notify(msg: str) -> None:
         logger.info(msg)
@@ -71,20 +74,23 @@ def run_pipeline(progress_cb=None) -> None:
 
     if not lock.acquire():
         logger.warning("Pipeline skipped — another run is already in progress")
-        _notify("⚠️ A run is already in progress; skipped.")
+        _notify("⚠️ Запуск уже выполняется — пропущено.")
         return
 
-    db.init(settings)  # ensure schema + channels/products seeded before every run
-
-    run_id = db.create_run()
-    logger.info("── Run #%d started ──────────────────────────────────────", run_id)
-    n_channels = len(settings.channels)
-    _notify(
-        f"🔍 Scanning {n_channels} competitor channel{'s' if n_channels != 1 else ''}"
-        " for recent prices..."
-    )
-
     try:
+        db.init(settings)  # ensure schema + channels/products seeded before every run
+
+        channels = db.get_active_channels()
+        if not channels:
+            logger.warning("Pipeline skipped — no active competitor channels configured")
+            _notify("⚠️ Нет активных каналов конкурентов. Добавьте канал через панель управления.")
+            return
+
+        run_id = db.create_run()
+        logger.info("── Run #%d started ──────────────────────────────────────", run_id)
+        n_channels = len(channels)
+        _notify(f"🔍 Сканирую {n_channels} канал(а) конкурентов...")
+
         # ── 1. Fetch messages ───────────────────────────────────────────────
         try:
             messages, unavailable = fetch_messages(run_id, progress_cb=_notify)
@@ -97,12 +103,12 @@ def run_pipeline(progress_cb=None) -> None:
             logger.critical("Fetch stage crashed: %s", exc, exc_info=True)
             errors.append(f"Fetch failed: {exc}")
             messages = []
-            unavailable = [ch.username for ch in settings.channels]
+            unavailable = [ch["username"] for ch in channels]
 
         for ch in unavailable:
             errors.append(f"Channel unavailable: {ch}")
 
-        _notify(f"📥 {len(messages)} messages collected. Finding prices...")
+        _notify(f"📥 Собрано {len(messages)} сообщений. Ищу цены...")
 
         # ── 2. Match products → prices ──────────────────────────────────────
         match_results = match_products(messages, settings.products)
@@ -113,9 +119,9 @@ def run_pipeline(progress_cb=None) -> None:
         if n_found == 0 and messages:
             logger.critical("0 prices found across %d messages", len(messages))
             errors.append("0 prices found")
-            _notify("⚠️ No prices found — channel format may have changed.")
+            _notify("⚠️ Цены не найдены — возможно, изменился формат сообщений в каналах.")
 
-        _notify(f"💰 Found prices for {n_found}/{n_total} products.")
+        _notify(f"💰 Найдено цен: {n_found}/{n_total}.")
 
         # ── 3. Calculate prices + persist ───────────────────────────────────
         db_products = db.get_all_products()
@@ -127,32 +133,6 @@ def run_pipeline(progress_cb=None) -> None:
         )
 
         for r in price_results:
-            if not r["price_kept"] and r["is_large_change"]:
-                change_id = db.create_pending_price_change(
-                    run_id=run_id,
-                    product_id=r["db_id"],
-                    proposed_price=r["calculated_price"],
-                    old_price=r["old_price"],
-                )
-                for admin in settings.admins:
-                    send_to_chat_markup(
-                        admin.telegram_id,
-                        "Large price change needs confirmation\n"
-                        f"{r['canonical_name']}\n"
-                        f"Old: {r['old_price']}\n"
-                        f"New: {r['calculated_price']}\n"
-                        f"Delta: {r['price_delta']}",
-                        {
-                            "inline_keyboard": [[
-                                {"text": "ДА", "callback_data": f"approve_price_{change_id}"},
-                                {"text": "написать свою цену", "callback_data": f"manual_price_{change_id}"},
-                            ]]
-                        },
-                    )
-                errors.append(f"Pending admin confirmation: {r['canonical_name']}")
-                r["calculated_price"] = r["old_price"]
-                r["price_kept"] = True
-
             if not r["price_kept"]:
                 db.update_product_price(r["db_id"], r["calculated_price"])
             db.write_price_history(
@@ -168,27 +148,24 @@ def run_pipeline(progress_cb=None) -> None:
 
         # ── 4. Build texts ──────────────────────────────────────────────────
         price_list_text = build_price_list(price_results, settings.price_list_template)
-        channel_names = [ch.username for ch in settings.channels]
+        channel_names = [ch["username"] for ch in channels]
         report_text = build_report(
             price_results, unavailable, channel_names, started_at, errors
         )
 
         # ── 5. Generate story images ────────────────────────────────────────
-        _notify("🎨 Creating story images...")
+        _notify("🎨 Создаю сторис...")
         story_paths: list[str] = []
         try:
             story_paths = generate_stories(price_results, settings.story)
         except Exception as exc:
             logger.error("Story generation failed: %s", exc, exc_info=True)
             errors.append(f"Story generation failed: {exc}")
-            _notify(f"⚠️ Story images failed: {exc}")
+            _notify(f"⚠️ Ошибка генерации сторис: {exc}")
 
         # ── 6. Deliver to admins ────────────────────────────────────────────
         n_stories = len(story_paths)
-        _notify(
-            f"📤 Sending price list and "
-            f"{n_stories} story image{'s' if n_stories != 1 else ''} to you..."
-        )
+        _notify(f"📤 Отправляю прайс и {n_stories} сторис...")
         try:
             delivery_errors = send_all(price_list_text, report_text, story_paths)
             errors.extend(delivery_errors)
@@ -212,19 +189,119 @@ def run_pipeline(progress_cb=None) -> None:
         )
 
         status_emoji = "✅" if status == "success" else ("⚠️" if status == "partial" else "❌")
-        _notify(
-            f"{status_emoji} Done — {n_priced}/{n_total} prices updated "
-            f"in {duration:.0f}s."
-        )
+        _notify(f"{status_emoji} Готово — {n_priced}/{n_total} цен обновлено за {duration:.0f}с.")
 
     except Exception as exc:
         logger.critical("Unhandled exception in pipeline: %s", exc, exc_info=True)
-        db.finish_run(run_id, "failed", 0, len(db.get_all_products()), [str(exc)])
+        if run_id is not None:
+            db.finish_run(run_id, "failed", 0, len(db.get_all_products()), [str(exc)])
         _notify(f"❌ Pipeline crashed: {exc}")
         raise
 
     finally:
         lock.release()
+
+
+def _wait_for_price_approvals(run_id: int, notify) -> bool:
+    deadline = time.monotonic() + _APPROVAL_TIMEOUT_SECONDS
+    last_unresolved: int | None = None
+
+    while time.monotonic() < deadline:
+        unresolved = db.count_unresolved_price_changes_for_run(run_id)
+        if unresolved == 0:
+            return True
+        if unresolved != last_unresolved:
+            logger.info("Waiting for %d unresolved price approval(s)", unresolved)
+            last_unresolved = unresolved
+        lock.refresh()
+        time.sleep(_APPROVAL_POLL_SECONDS)
+
+    return db.count_unresolved_price_changes_for_run(run_id) == 0
+
+
+def _apply_resolved_price_changes(
+    run_id: int,
+    pending_results_by_change_id: dict[int, dict],
+    errors: list[str],
+) -> None:
+    changes = {
+        change["id"]: change
+        for change in db.get_price_changes_for_run(run_id)
+        if change["id"] in pending_results_by_change_id
+    }
+
+    for change_id, result in pending_results_by_change_id.items():
+        change = changes.get(change_id)
+        status = change["status"] if change else "missing"
+        old_price = result.get("old_price")
+
+        if status == "approved":
+            final_price = change["proposed_price"]
+            price_kept = False
+        elif status == "manual" and change.get("manual_price") is not None:
+            final_price = change["manual_price"]
+            price_kept = False
+            result["price_delta"] = (
+                final_price - old_price if old_price is not None else 0
+            )
+            default_price = result.get("default_price")
+            result["default_delta"] = (
+                final_price - default_price if default_price is not None else None
+            )
+        else:
+            final_price = old_price
+            price_kept = True
+            if status in {"pending", "awaiting_manual"}:
+                errors.append(f"Unresolved price confirmation: {result['canonical_name']}")
+
+        result["calculated_price"] = final_price
+        result["price_kept"] = price_kept
+
+        db.write_price_history(
+            run_id=run_id,
+            product_id=result["db_id"],
+            competitor_price=result["competitor_price"],
+            source_channel=result["source_channel"],
+            calculated_price=final_price,
+            price_delta=result["price_delta"],
+            is_large_change=result["is_large_change"],
+            price_kept=price_kept,
+        )
+
+
+def _format_large_change_confirmation(result: dict, match: dict) -> str:
+    lines = [
+        "⚠️ Крупное изменение цены — требуется подтверждение",
+        result["canonical_name"],
+        f"Канал конкурента: @{result.get('source_channel') or match.get('source_channel') or '—'}",
+        f"Цена конкурента: {_fmt_money(result.get('competitor_price'))}",
+        f"Старая цена: {_fmt_money(result['old_price'])}",
+        f"Новая цена: {_fmt_money(result['calculated_price'])}",
+        f"Разница: {_fmt_delta(result['price_delta'])}",
+    ]
+    matched_lines = match.get("matched_lines") or []
+    if matched_lines:
+        lines.append("")
+        lines.append("Совпавшие строки:")
+        for item in matched_lines[:3]:
+            original = (item.get("original_text") or item.get("text") or "").strip()
+            if len(original) > 180:
+                original = original[:177].rstrip() + "..."
+            lines.append(f'@{item["channel"]}: "{original}" → {_fmt_money(item["price"])}')
+    return "\n".join(lines)
+
+
+def _fmt_money(value: int | None) -> str:
+    if value is None:
+        return "—"
+    return f"{value:,}".replace(",", " ") + " ₽"
+
+
+def _fmt_delta(value: int | None) -> str:
+    if value is None:
+        return "—"
+    sign = "+" if value > 0 else ""
+    return f"{sign}{value:,}".replace(",", " ") + " ₽"
 
 
 if __name__ == "__main__":

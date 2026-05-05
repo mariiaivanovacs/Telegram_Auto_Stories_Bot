@@ -53,6 +53,12 @@ def _send_photo(token: str, chat_id: int, photo_path: str) -> bool:
     return bool(result.get("ok"))
 
 
+def send_photo_to_chat(chat_id: int, photo_path: str) -> bool:
+    """Send one local PNG/JPEG image to a specific chat."""
+    settings = get_settings()
+    return _send_photo(settings.bot_token, chat_id, photo_path)
+
+
 # ── Userbot story posting ──────────────────────────────────────────────────────
 
 async def _post_stories_userbot(story_paths: list[str]) -> bool:
