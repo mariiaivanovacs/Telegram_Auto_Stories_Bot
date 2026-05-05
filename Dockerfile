@@ -4,7 +4,10 @@ WORKDIR /app
 
 # System deps: emoji font for Pillow story rendering
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends fonts-noto-color-emoji \
+    && apt-get install -y --no-install-recommends \
+        fonts-noto-color-emoji \
+        fonts-noto-core \
+        fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python deps first (layer-cache friendly)

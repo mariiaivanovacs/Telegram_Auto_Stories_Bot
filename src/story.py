@@ -5,7 +5,7 @@ import copy
 from datetime import datetime
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,7 @@ _DESIGNS: dict[int, dict] = {
         "pad_y":          20,
         "pad_y_title":    24,
         "font_override":  None,
+        "bold_body":      False,
     },
     2: {
         "title_panel":    (255, 255, 255, 200),
@@ -134,40 +135,6 @@ def generate_stories(
 
     if not paths:
         raise RuntimeError("All 3 story renders failed — check logs")
-    return paths
-
-
-def generate_photo_previews(
-    story_cfg,
-    output_dir: str = "output/photo_previews",
-    backgrounds_dir: str = "backgrounds",
-    date_str: str | None = None,
-) -> list[str]:
-    """
-    Generate 3 edited story-size background images without text.
-
-    The edit is intentionally restrained: crop for Telegram story format, add a
-    little color/contrast/detail, then darken slightly so future text can sit on
-    top without fighting the photo.
-    """
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-    if date_str is None:
-        date_str = datetime.now().strftime("%Y%m%d")
-
-    backgrounds = _pick_backgrounds(backgrounds_dir, story_cfg.background_selection)
-
-    paths: list[str] = []
-    for i, bg_path in enumerate(backgrounds, start=1):
-        out_path = Path(output_dir) / f"photo_preview_{i}_{date_str}.png"
-        try:
-            _render_photo_preview(bg_path, out_path)
-            paths.append(str(out_path))
-            logger.info("Photo preview %d saved: %s", i, out_path)
-        except Exception as e:
-            logger.error("Photo preview %d failed: %s", i, e, exc_info=True)
-
-    if not paths:
-        raise RuntimeError("All 3 photo preview renders failed — check logs")
     return paths
 
 
@@ -280,17 +247,6 @@ def _pick_backgrounds(dir_path: str, selection: str) -> list[str]:
 
 # ── Per-image render ───────────────────────────────────────────────────────────
 
-def _render(bg_path: str, lines: list[dict], cfg, out_path: Path) -> None:
-    img = Image.open(bg_path).convert("RGB")
-    img = _resize_crop(img, STORY_W, STORY_H)
-    img = img.filter(ImageFilter.GaussianBlur(radius=cfg.blur_radius))
-
-    overlay = Image.new("RGBA", (STORY_W, STORY_H), (0, 0, 0, cfg.darken_alpha))
-    img = Image.alpha_composite(img.convert("RGBA"), overlay)
-
-    img = _draw_content(img, lines, cfg)
-    img.convert("RGB").save(out_path, "PNG", optimize=True)
-
 
 def _render_photo_preview(bg_path: str, out_path: Path) -> None:
     img = Image.open(bg_path).convert("RGB")
@@ -347,77 +303,6 @@ def _resize_crop(img: Image.Image, w: int, h: int) -> Image.Image:
     return img.crop((left, top, left + w, top + h))
 
 
-# ── Content drawing ────────────────────────────────────────────────────────────
-
-def _draw_content(img: Image.Image, lines: list[dict], cfg) -> Image.Image:
-    fs_title = cfg.font_size_title
-    fs_body = cfg.font_size_body
-    fs_price = cfg.font_size_price
-    lh = cfg.line_height
-
-    font_title = _font(cfg.font_path, fs_title)
-    font_body = _font(cfg.font_path, fs_body)
-    # Prices use regular weight when available; falls back to bold
-    _reg_path = _regular_font_path(cfg.font_path) or cfg.font_path
-    font_price = _font(_reg_path, fs_price)
-
-    line_heights = {
-        "header":   int(fs_title * lh),
-        "category": int(fs_body  * lh),
-        "price":    int(fs_price * lh),
-        "footer":   int(fs_body  * lh),
-        "spacer":   int(fs_body  * lh // 2),
-    }
-
-    total_h = sum(line_heights.get(ln["type"], 0) for ln in lines)
-    panel_w = STORY_W - 2 * cfg.padding_x
-    panel_h = total_h + 2 * cfg.padding_y
-    px0 = cfg.padding_x
-    py0 = (STORY_H - panel_h) // 2
-    px1 = STORY_W - cfg.padding_x
-    py1 = py0 + panel_h
-
-    # Guard: panel must fit inside canvas
-    if py0 < 40:
-        py0 = 40
-        py1 = py0 + panel_h
-
-    # Draw semi-transparent panel
-    panel_layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    pd = ImageDraw.Draw(panel_layer)
-    panel_color = tuple(cfg.panel_color) if not isinstance(cfg.panel_color, tuple) else cfg.panel_color
-    _rounded_rect(pd, (px0, py0, px1, py1), cfg.panel_corner_radius, panel_color)
-    img = Image.alpha_composite(img, panel_layer)
-
-    draw = ImageDraw.Draw(img)
-    text_x = px0 + cfg.padding_x // 2
-    y = py0 + cfg.padding_y
-
-    for ln in lines:
-        ltype = ln["type"]
-        text = ln["text"]
-
-        if ltype == "spacer" or not text:
-            y += line_heights.get("spacer", 20)
-            continue
-
-        font, color = _style(ltype, font_title, font_body, font_price, cfg.accent_color)
-
-        # Measure and shrink text that overflows the panel
-        max_w = panel_w - cfg.padding_x
-        actual_w = _text_width(draw, text, font)
-        if actual_w > max_w and actual_w > 0:
-            ratio = max_w / actual_w
-            shrunk_size = max(14, int(_font_size(font) * ratio))
-            font_path = _reg_path if ltype == "price" else cfg.font_path
-            font = _font(font_path, shrunk_size)
-
-        draw.text((text_x, y), text, font=font, fill=color)
-
-        y += line_heights.get(ltype, int(fs_body * lh))
-
-    return img
-
 
 def _draw_sample_text_lines(img: Image.Image, text: str, cfg, design: int = 1) -> Image.Image:
     draw = ImageDraw.Draw(img)
@@ -428,10 +313,11 @@ def _draw_sample_text_lines(img: Image.Image, text: str, cfg, design: int = 1) -
 
     rendered_sections = []
     max_total_h = STORY_H - 160
+    bold_body = design_spec.get("bold_body", True)
 
     for title_size in range(56, 33, -2):
         section_title_font = _font(font_path, title_size, bold=True)
-        section_body_font = _font(font_path, max(30, title_size - 12), bold=True)
+        section_body_font = _font(font_path, max(30, title_size - 12), bold=bold_body)
         candidate = _prepare_render_sections(
             sections, draw, section_title_font, section_body_font, font_path, design_spec,
         )
@@ -441,7 +327,7 @@ def _draw_sample_text_lines(img: Image.Image, text: str, cfg, design: int = 1) -
             break
     if not rendered_sections:
         section_title_font = _font(font_path, 32, bold=True)
-        section_body_font = _font(font_path, 26, bold=True)
+        section_body_font = _font(font_path, 26, bold=bold_body)
         rendered_sections = _prepare_render_sections(
             sections, draw, section_title_font, section_body_font, font_path, design_spec,
         )
@@ -532,7 +418,8 @@ def _prepare_render_sections(
         is_title = section["kind"] == "title"
         font = title_font if is_title else body_font
         regular_font = _font(_regular_font_path(font_path), _font_size(font), bold=False)
-        header_font = _font(font_path, max(24, _font_size(body_font) - 7), bold=True)
+        bold_body = spec.get("bold_body", True)
+        header_font = _font(font_path, max(24, _font_size(body_font) - 7), bold=bold_body)
         pad_x = 36 if is_title else 32
         pad_y = spec["pad_y_title"] if is_title else spec["pad_y"]
         margin_x = 40
@@ -646,17 +533,6 @@ def _section_palette(kind: str) -> tuple[tuple[int, int, int, int], tuple[int, i
     return (0, 0, 0, 115), (255, 255, 255, 22)  # dark frosted glass
 
 
-def _style(ltype: str, ft, fb, fp, accent: str):
-    _dark = (20, 20, 20, 255)
-    _mid = (60, 60, 60, 255)
-    if ltype == "header":
-        return ft, _dark
-    if ltype == "category":
-        return fb, _mid
-    if ltype == "price":
-        return fp, _dark
-    return fb, _mid  # footer
-
 
 def _resolve_design_font(spec: dict, base_font_path: str) -> str:
     override = spec.get("font_override")
@@ -679,6 +555,7 @@ def _resolve_design_font(spec: dict, base_font_path: str) -> str:
 def _font(path: str, size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     candidates = [
         path,
+        # macOS
         "/System/Library/Fonts/SFNS.ttf",
         "/System/Library/Fonts/SFNSRounded.ttf",
         "/System/Library/Fonts/SFCompact.ttf",
@@ -690,8 +567,15 @@ def _font(path: str, size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
         "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
         "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/System/Library/Fonts/Supplemental/Helvetica.ttf",
+        # Linux / Docker — Cyrillic-capable (fonts-noto-core, fonts-dejavu-core)
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf" if bold else "",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/noto/NotoSans-Bold.ttf" if bold else "",
+        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf" if bold else "",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
     ]
     for candidate in candidates:
         if not candidate:
@@ -925,49 +809,6 @@ def _segment_color(seg_type: str, kind: str = "", is_section_title: bool = False
         return (200, 200, 200, 255)  # slightly subdued for section headers inside cards
     return (245, 245, 245, 255)  # white for all body text
 
-
-def _rounded_rect(draw: ImageDraw.ImageDraw, xy, r: int, fill) -> None:
-    x0, y0, x1, y1 = xy
-    draw.rectangle([x0 + r, y0, x1 - r, y1], fill=fill)
-    draw.rectangle([x0, y0 + r, x1, y1 - r], fill=fill)
-    draw.ellipse([x0, y0, x0 + 2 * r, y0 + 2 * r], fill=fill)
-    draw.ellipse([x1 - 2 * r, y0, x1, y0 + 2 * r], fill=fill)
-    draw.ellipse([x0, y1 - 2 * r, x0 + 2 * r, y1], fill=fill)
-    draw.ellipse([x1 - 2 * r, y1 - 2 * r, x1, y1], fill=fill)
-
-
-# ── Price lines builder ────────────────────────────────────────────────────────
-
-def _build_lines(price_results: list[dict]) -> list[dict]:
-    lines: list[dict] = [
-        {"type": "header", "text": "Любая техника по выгодной цене"},
-        {"type": "spacer", "text": ""},
-    ]
-
-    seen_cats: list[str] = []
-    by_cat: dict[str, list[dict]] = {}
-    for r in price_results:
-        cat = r.get("category", "Другое")
-        if cat not in by_cat:
-            seen_cats.append(cat)
-            by_cat[cat] = []
-        by_cat[cat].append(r)
-
-    for cat in seen_cats:
-        lines.append({"type": "category", "text": cat})
-        for r in by_cat[cat]:
-            name = r.get("display_name") or r.get("canonical_name", "")
-            price = r.get("calculated_price")
-            price_str = f"{price:,}".replace(",", " ") + " рублей" if price is not None else "—"
-            lines.append({"type": "price", "text": f"• {name} — {price_str}"})
-        lines.append({"type": "spacer", "text": ""})
-
-    lines += [
-        {"type": "footer", "text": "Весь товар оригинал, количество ограничено"},
-        {"type": "footer", "text": "Доставка по Москве за 2 часа"},
-        {"type": "footer", "text": "Заказать: @svyat_001"},
-    ]
-    return lines
 
 
 def _build_sample_story_text(price_results: list[dict], sample_text_path: str) -> str:

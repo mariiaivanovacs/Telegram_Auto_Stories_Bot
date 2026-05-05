@@ -23,9 +23,10 @@ Reference: `new_architecture.md` for structure decisions.
 |---|---|
 | 1 — Admin panel + Russian commands | ✅ Done |
 | 2 — Competition report Excel | ✅ Done |
-| 3 — Image management (complete) | ⬜ Pending |
+| 3 — Image management (complete) | ✅ Done |
 | 4 — Channel management | ✅ Done (implemented in Phase 1) |
-| 5 — Cloud Run deployment | ⬜ Pending |
+| 5 — Docker production deployment | ✅ Done |
+| Scheduler — daily at 09:00 Moscow | ✅ Done |
 
 ---
 
