@@ -4,6 +4,16 @@ set -e
 # Ensure runtime directories exist (relevant when volumes are mounted empty)
 mkdir -p data logs output ready_images
 
+# On Cloud Run, GCS is mounted at /app/gcs_data (read-only source of truth).
+# SQLite cannot run on GCS FUSE (no POSIX file locking), so we keep the DB on
+# local disk and only pull the session file from GCS at startup.
+if [ -n "$PORT" ] && [ -d "/app/gcs_data" ]; then
+    if [ -f "/app/gcs_data/userbot.session" ]; then
+        cp /app/gcs_data/userbot.session data/userbot.session
+        echo "Session copied from GCS to local data/"
+    fi
+fi
+
 # Guard: Telethon session must be created before starting the bot.
 # Run this once on the host before `docker compose up`:
 #   python scripts/create_session.py
