@@ -1,0 +1,220 @@
+channels:
+  - username: "@channel_one"
+    display_name: "Channel One"
+  - username: "@channel_two"
+    display_name: "Channel Two"
+  - username: "@channel_three"
+    display_name: "Channel Three"
+
+pricing:
+  discount: 500
+  large_change_threshold: 3000
+
+schedule:
+  run_time: "09:00"
+  timezone: "Europe/Moscow"
+
+story:
+  blur_radius: 8
+  darken_alpha: 120
+  panel_color: [0, 0, 0, 160]
+  panel_corner_radius: 24
+  padding_x: 60
+  padding_y: 48
+  font_path: "assets/Inter-SemiBold.ttf"
+  font_size_title: 42
+  font_size_body: 34
+  font_size_price: 38
+  line_height: 1.5
+  accent_color: "#F5A623"
+  background_selection: "random"
+
+price_list_template: |
+  Any tech in stock at a great price 🔥
+
+  iPhone
+  • Pro 256 GB — {iphone_pro_256} RUB
+  • Pro 512 GB — {iphone_pro_512} RUB
+  • Pro 1 TB — {iphone_pro_1tb} RUB
+  • Pro Max 256 GB — {iphone_pro_max_256} RUB
+  • Pro Max 512 GB — {iphone_pro_max_512} RUB
+  • Pro Max 1 TB — {iphone_pro_max_1tb} RUB
+  • Air — {iphone_air} RUB
+  • eSIM price ↑ +500 RUB
+
+  Other
+  • MacBook Neo — {macbook_neo} RUB
+  • AirPods Pro 3 — {airpods_pro_3} RUB
+  • Whoop 5.0 Peak — {whoop_50} RUB
+  • PS5 — {ps5} RUB
+  • Apple Watch S11 — {apple_watch_s11} RUB
+
+  All items are original, but stock is limited!
+  Delivery in Moscow within 2 hours
+  To order, message me: @svyat_001
+
+# Seed admin — replaced with real telegram_id before deployment
+admins:
+  - telegram_id: 987654321
+    username: "@owner"
+
+products:
+  - id: iphone_pro_256
+    canonical: "iPhone Pro 256 GB"
+    category: "iPhone"
+    display_name: "Pro 256 GB"
+    aliases:
+      - "iphone pro 256"
+      - "iphone 17 pro 256"
+      - "17 pro 256 gb"
+      - "17 pro 256gb"
+      - "pro 256 gb"
+      - "pro 256gb"
+      - "pro 256"
+      - "айфон про 256"
+    regex: '(?:iphone\s*)?(?:1[5-9]\s*)?pro\s*256\s*(?:gb)?'
+    exclude_if_contains: ["max", "plus"]
+
+  - id: iphone_pro_512
+    canonical: "iPhone Pro 512 GB"
+    category: "iPhone"
+    display_name: "Pro 512 GB"
+    aliases:
+      - "iphone pro 512"
+      - "iphone 17 pro 512"
+      - "17 pro 512 gb"
+      - "pro 512 gb"
+      - "pro 512gb"
+      - "pro 512"
+      - "айфон про 512"
+    regex: '(?:iphone\s*)?(?:1[5-9]\s*)?pro\s*512\s*(?:gb)?'
+    exclude_if_contains: ["max", "plus"]
+
+  - id: iphone_pro_1tb
+    canonical: "iPhone Pro 1 TB"
+    category: "iPhone"
+    display_name: "Pro 1 TB"
+    aliases:
+      - "iphone pro 1tb"
+      - "iphone pro 1 tb"
+      - "pro 1tb"
+      - "pro 1 tb"
+      - "17 pro 1tb"
+      - "айфон про 1тб"
+    regex: '(?:iphone\s*)?(?:1[5-9]\s*)?pro\s*1\s*tb'
+    exclude_if_contains: ["max"]
+
+  - id: iphone_pro_max_256
+    canonical: "iPhone Pro Max 256 GB"
+    category: "iPhone"
+    display_name: "Pro Max 256 GB"
+    aliases:
+      - "iphone pro max 256"
+      - "pro max 256 gb"
+      - "pro max 256gb"
+      - "pro max 256"
+      - "max 256"
+      - "айфон про макс 256"
+    regex: '(?:iphone\s*)?(?:1[5-9]\s*)?pro\s*max\s*256\s*(?:gb)?'
+    exclude_if_contains: []
+
+  - id: iphone_pro_max_512
+    canonical: "iPhone Pro Max 512 GB"
+    category: "iPhone"
+    display_name: "Pro Max 512 GB"
+    aliases:
+      - "iphone pro max 512"
+      - "pro max 512 gb"
+      - "pro max 512gb"
+      - "pro max 512"
+      - "max 512"
+      - "айфон про макс 512"
+    regex: '(?:iphone\s*)?(?:1[5-9]\s*)?pro\s*max\s*512\s*(?:gb)?'
+    exclude_if_contains: []
+
+  - id: iphone_pro_max_1tb
+    canonical: "iPhone Pro Max 1 TB"
+    category: "iPhone"
+    display_name: "Pro Max 1 TB"
+    aliases:
+      - "iphone pro max 1tb"
+      - "pro max 1tb"
+      - "pro max 1 tb"
+      - "max 1tb"
+      - "айфон про макс 1тб"
+    regex: '(?:iphone\s*)?(?:1[5-9]\s*)?pro\s*max\s*1\s*tb'
+    exclude_if_contains: []
+
+  - id: iphone_air
+    canonical: "iPhone Air"
+    category: "iPhone"
+    display_name: "Air"
+    aliases:
+      - "iphone air"
+      - "iphone air 256"
+      - "iphone air 128"
+      - "айфон аир"
+    regex: 'iphone\s*air'
+    exclude_if_contains: []
+
+  - id: macbook_neo
+    canonical: "MacBook Neo"
+    category: "Other"
+    display_name: "MacBook Neo"
+    aliases:
+      - "macbook neo"
+      - "mac neo"
+      - "мак нео"
+      - "макбук нео"
+    regex: 'macbook\s*neo'
+    exclude_if_contains: []
+
+  - id: airpods_pro_3
+    canonical: "AirPods Pro 3"
+    category: "Other"
+    display_name: "AirPods Pro 3"
+    aliases:
+      - "airpods pro 3"
+      - "airpods pro3"
+      - "pods pro 3"
+      - "аирподс про 3"
+    regex: 'airpods\s*pro\s*3'
+    exclude_if_contains: []
+
+  - id: whoop_50
+    canonical: "Whoop 5.0 Peak"
+    category: "Other"
+    display_name: "Whoop 5.0 Peak"
+    aliases:
+      - "whoop 5.0 peak"
+      - "whoop 5.0"
+      - "whoop 5"
+      - "whoop peak"
+    regex: 'whoop\s*5(?:\.0)?(?:\s*peak)?'
+    exclude_if_contains: []
+
+  - id: ps5
+    canonical: "PS5"
+    category: "Other"
+    display_name: "PS5"
+    aliases:
+      - "ps5"
+      - "playstation 5"
+      - "playstation5"
+      - "пс5"
+      - "пс 5"
+      - "плейстейшн 5"
+    regex: 'ps\s*5|playstation\s*5'
+    exclude_if_contains: []
+
+  - id: apple_watch_s11
+    canonical: "Apple Watch S11"
+    category: "Other"
+    display_name: "Apple Watch S11"
+    aliases:
+      - "apple watch s11"
+      - "watch s11"
+      - "watch series 11"
+      - "эпл вотч с11"
+    regex: '(?:apple\s*)?watch\s*s(?:eries\s*)?11'
+    exclude_if_contains: []

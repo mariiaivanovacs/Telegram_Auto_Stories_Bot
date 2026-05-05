@@ -1,0 +1,13 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./output:/app/output
+      - ./backgrounds:/app/backgrounds
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Moscow

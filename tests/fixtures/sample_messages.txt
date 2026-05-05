@@ -1,0 +1,57 @@
+=== @channel_one (English, explicit RUB, one product per line) ===
+iPhone Pro 256 GB — 84500 руб
+iPhone Pro 512 GB — 94500 руб
+iPhone Pro 1 TB — 104000 руб
+iPhone Pro Max 256 GB — 95000 руб
+iPhone Pro Max 512 GB — 106000 руб
+iPhone Pro Max 1 TB — 117000 руб
+iPhone Air — 69000 руб
+MacBook Neo — 142000 руб
+AirPods Pro 3 — 18500 руб
+Whoop 5.0 Peak — 34000 руб
+PS5 — 46000 руб
+Apple Watch S11 — 38000 руб
+
+=== @channel_two (Russian Cyrillic, spaces in prices, р suffix) ===
+Айфон Про 256 - 83 000р
+Айфон Про 512 - 93 000р
+Айфон Про 1ТБ - 103 500р
+Айфон Про Макс 256 - 93 500р
+Айфон Про Макс 512 - 104 500р
+Айфон Про Макс 1ТБ - 115 000р
+Айфон Аир — 68 500р
+Аирподс Про 3 — 17 900р
+Вотч С11 — 37 500р
+ПС5 47000р
+Макбук Нео 141 000р
+Вуп 5.0 Пик 33 500р
+
+=== @channel_three (k-shorthand, no explicit currency, per-line) ===
+17 Pro 256GB 85к
+17 Pro 512GB 95к
+17 Pro 1TB 105к
+17 Pro Max 256 96к
+17 Pro Max 512 107к
+17 Pro Max 1TB 118к
+iPhone Air 69.5к
+MacBook Neo 143к
+AirPods Pro3 18.5к
+PS5 47к
+Watch S11 39к
+Whoop 5.0 Peak 34.5к
+
+=== @channel_four (dense blob, mixed) ===
+📱 Актуальные цены на технику 🔥
+Айфон 17 Про 256 — 84000 rub | Айфон 17 Про 512 — 94000 rub
+Про Макс 256 — 94500 rub | Про Макс 512 — 105500 rub
+MacBook Neo 142500 rub
+AirPods Pro 3 18200 rub
+Apple Watch Series 11 38500 rub
+PlayStation 5 — 46500 rub
+Whoop 5 Peak 34200 rub
+
+=== edge cases ===
+iPhone Pro Max 256 — should NOT match iphone_pro_256 — 95000 rub
+Pro 256 without "max" context 84000 rub
+iphone pro 256gb 84800rub
+IPHONE PRO 256 GB 85000 RUB
