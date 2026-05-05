@@ -32,6 +32,7 @@ except Exception:
 _COMMANDS = [
     ("start",  "Открыть главное меню"),
     ("run",    "Запустить сбор цен и генерацию сторис прямо сейчас"),
+    ("stop",   "Остановить текущий запуск пайплайна"),
     ("status", "Показать статус и результаты последнего запуска"),
     ("ping",   "Проверить, что бот работает"),
     ("admin",  "Войти как администратор (потребуется пароль)"),
@@ -81,6 +82,7 @@ def run_bot() -> None:
     app.add_handler(CommandHandler("ping",   admin.cmd_ping))
     app.add_handler(CommandHandler("status", admin.cmd_status))
     app.add_handler(CommandHandler("run",    pipeline.cmd_run))
+    app.add_handler(CommandHandler("stop",   pipeline.cmd_stop))
 
     # ── Inline button callbacks ────────────────────────────────────────────────
 

@@ -223,6 +223,16 @@ async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _trigger(update, context)
 
 
+async def cmd_stop(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("Нет доступа.")
+        return
+    if lock.cancel():
+        await update.message.reply_text("🛑 Сигнал остановки отправлен — пайплайн завершится после текущего шага.")
+    else:
+        await update.message.reply_text("ℹ️ Пайплайн сейчас не запущен.")
+
+
 # ── Button callbacks ───────────────────────────────────────────────────────────
 
 async def btn_run_now(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

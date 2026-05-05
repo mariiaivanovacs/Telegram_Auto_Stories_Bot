@@ -8,6 +8,7 @@ from pathlib import Path
 import time
 
 PATH = Path("data/.run_lock")
+_CANCEL_PATH = Path("data/.run_cancel")
 STALE_SECONDS = 30 * 60
 
 
@@ -19,6 +20,7 @@ def acquire() -> bool:
             return False
         PATH.unlink(missing_ok=True)
 
+    _CANCEL_PATH.unlink(missing_ok=True)
     PATH.parent.mkdir(parents=True, exist_ok=True)
     PATH.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
     return True
@@ -26,6 +28,20 @@ def acquire() -> bool:
 
 def release() -> None:
     PATH.unlink(missing_ok=True)
+    _CANCEL_PATH.unlink(missing_ok=True)
+
+
+def cancel() -> bool:
+    """Signal the running pipeline to stop. Returns False if nothing is running."""
+    if not is_locked():
+        return False
+    _CANCEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _CANCEL_PATH.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
+    return True
+
+
+def is_cancelled() -> bool:
+    return _CANCEL_PATH.exists()
 
 
 def refresh() -> None:

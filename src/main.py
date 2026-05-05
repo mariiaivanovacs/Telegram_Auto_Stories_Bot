@@ -72,6 +72,13 @@ def run_pipeline(progress_cb=None, wait_chat_id: int | None = None) -> None:
             except Exception as exc:
                 logger.warning("Progress callback error: %s", exc)
 
+    class _Cancelled(Exception):
+        pass
+
+    def _check_cancel() -> None:
+        if lock.is_cancelled():
+            raise _Cancelled
+
     if not lock.acquire():
         logger.warning("Pipeline skipped — another run is already in progress")
         _notify("⚠️ Запуск уже выполняется — пропущено.")
@@ -109,6 +116,7 @@ def run_pipeline(progress_cb=None, wait_chat_id: int | None = None) -> None:
             errors.append(f"Channel unavailable: {ch}")
 
         _notify(f"📥 Собрано {len(messages)} сообщений. Ищу цены...")
+        _check_cancel()
 
         # ── 2. Match products → prices ──────────────────────────────────────
         match_results = match_products(messages, settings.products)
@@ -122,6 +130,7 @@ def run_pipeline(progress_cb=None, wait_chat_id: int | None = None) -> None:
             _notify("⚠️ Цены не найдены — возможно, изменился формат сообщений в каналах.")
 
         _notify(f"💰 Найдено цен: {n_found}/{n_total}.")
+        _check_cancel()
 
         # ── 3. Calculate prices + persist ───────────────────────────────────
         db_products = db.get_all_products()
@@ -146,12 +155,16 @@ def run_pipeline(progress_cb=None, wait_chat_id: int | None = None) -> None:
                 price_kept=r["price_kept"],
             )
 
+        _check_cancel()
+
         # ── 4. Build texts ──────────────────────────────────────────────────
         price_list_text = build_price_list(price_results, settings.price_list_template)
         channel_names = [ch["username"] for ch in channels]
         report_text = build_report(
             price_results, unavailable, channel_names, started_at, errors
         )
+
+        _check_cancel()
 
         # ── 5. Generate story images ────────────────────────────────────────
         _notify("🎨 Создаю сторис...")
@@ -190,6 +203,12 @@ def run_pipeline(progress_cb=None, wait_chat_id: int | None = None) -> None:
 
         status_emoji = "✅" if status == "success" else ("⚠️" if status == "partial" else "❌")
         _notify(f"{status_emoji} Готово — {n_priced}/{n_total} цен обновлено за {duration:.0f}с.")
+
+    except _Cancelled:
+        logger.info("Pipeline cancelled by /stop command")
+        if run_id is not None:
+            db.finish_run(run_id, "cancelled", 0, len(db.get_all_products()), ["Отменено командой /stop"])
+        _notify("🛑 Пайплайн остановлен.")
 
     except Exception as exc:
         logger.critical("Unhandled exception in pipeline: %s", exc, exc_info=True)
