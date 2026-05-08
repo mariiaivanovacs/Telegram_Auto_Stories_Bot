@@ -5,6 +5,8 @@ calculates the owner's prices (competitor min − 500 ₽), generates story imag
 delivers everything via Telegram. All steps require admin confirmation before publishing.
 
 
+Задеплоено: https://django-stripe-149209962521.us-central1.run.app
+демо: https://drive.google.com/file/d/1YpG2IR7zFZfLVgscTxA6CgY6B8flnFlb/view?usp=sharing
 ---
 
 ## What it does
